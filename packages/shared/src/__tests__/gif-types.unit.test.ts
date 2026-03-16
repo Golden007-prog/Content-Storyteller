@@ -11,8 +11,8 @@ import {
   AssetType,
   JobState,
   OutputPreference,
-} from '@content-storyteller/shared';
-import type { OutputIntent, StepsMap } from '@content-storyteller/shared';
+} from '../index';
+import type { OutputIntent, StepsMap } from '../index';
 
 describe('GIF shared type extensions', () => {
   describe('AssetType enum', () => {
