@@ -3,8 +3,6 @@ import {
   GenerationInput,
   GenerationOutput,
   CreativeBrief,
-  getModel,
-  getLocation,
 } from '@content-storyteller/shared';
 import { getGcpConfig } from '../config/gcp';
 
@@ -77,8 +75,10 @@ export class ImageGenerationCapability implements GenerationCapability {
       }
 
       const cfg = getGcpConfig();
-      const location = getLocation('image');
-      const model = getModel('image');
+      // Imagen API requires us-central1 location and a specific Imagen model
+      // The model router's 'image' slot is for Gemini image models, not Imagen
+      const location = 'us-central1';
+      const model = 'imagen-3.0-generate-001';
       const imagePrompt = prompt || buildImagePrompt(brief);
 
       // Imagen REST API predict endpoint
