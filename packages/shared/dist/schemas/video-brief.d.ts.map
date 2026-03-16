@@ -1,0 +1,1 @@
+{"version":3,"file":"video-brief.d.ts","sourceRoot":"","sources":["../../src/schemas/video-brief.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,eAAe,EAAE,MAAM,cAAc,CAAC;AAE/C,MAAM,WAAW,UAAU;IACzB,MAAM,EAAE,eAAe,EAAE,CAAC;IAC1B,aAAa,EAAE,MAAM,CAAC;IACtB,WAAW,EAAE,MAAM,CAAC;IACpB,gBAAgB,EAAE,MAAM,CAAC;IACzB,eAAe,EAAE,MAAM,CAAC;IACxB,eAAe,EAAE,MAAM,CAAC;CACzB"}

@@ -1,0 +1,107 @@
+steps:
+  # 1. Install dependencies
+  - name: 'node:20-alpine'
+    entrypoint: npm
+    args: ['ci']
+    id: install
+
+  # 2. Build API Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/api:latest'
+      - '-f'
+      - 'apps/api/Dockerfile'
+      - '.'
+    id: build-api
+    waitFor: ['install']
+
+  # 3. Build Worker Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/worker:latest'
+      - '-f'
+      - 'apps/worker/Dockerfile'
+      - '.'
+    id: build-worker
+    waitFor: ['install']
+
+  # 4. Push API image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/api:latest']
+    id: push-api
+    waitFor: ['build-api']
+
+  # 5. Push Worker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/worker:latest']
+    id: push-worker
+    waitFor: ['build-worker']
+
+  # 6. Deploy API to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'api-service'
+      - '--image'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/api:latest'
+      - '--region'
+      - 'us-central1'
+      - '--service-account'
+      - 'api-sa@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--set-env-vars'
+      - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=us-central1,UPLOADS_BUCKET=$PROJECT_ID-uploads,ASSETS_BUCKET=$PROJECT_ID-assets,FIRESTORE_DATABASE=(default),PUBSUB_TOPIC=content-generation-jobs,CORS_ORIGIN=https://golden007-prog.github.io,VERTEX_TEXT_MODEL=gemini-2.5-flash,VERTEX_TEXT_FALLBACK_MODEL=gemini-2.5-flash,VERTEX_REASONING_MODEL=gemini-2.5-pro,VERTEX_IMAGE_MODEL=gemini-2.5-flash,VERTEX_IMAGE_HQ_MODEL=gemini-2.5-pro'
+      - '--allow-unauthenticated'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--max-instances'
+      - '3'
+      - '--concurrency'
+      - '80'
+      - '--quiet'
+    id: deploy-api
+    waitFor: ['push-api']
+
+  # 7. Deploy Worker to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'worker-service'
+      - '--image'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/worker:latest'
+      - '--region'
+      - 'us-central1'
+      - '--service-account'
+      - 'worker-sa@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--set-env-vars'
+      - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=us-central1,UPLOADS_BUCKET=$PROJECT_ID-uploads,ASSETS_BUCKET=$PROJECT_ID-assets,TEMP_BUCKET=$PROJECT_ID-temp,FIRESTORE_DATABASE=(default),PUBSUB_SUBSCRIPTION=content-generation-jobs-sub,VERTEX_TEXT_MODEL=gemini-2.5-flash,VERTEX_TEXT_FALLBACK_MODEL=gemini-2.5-flash,VERTEX_REASONING_MODEL=gemini-2.5-pro,VERTEX_IMAGE_MODEL=gemini-2.5-flash,VERTEX_IMAGE_HQ_MODEL=gemini-2.5-pro'
+      - '--no-allow-unauthenticated'
+      - '--memory'
+      - '1Gi'
+      - '--cpu'
+      - '2'
+      - '--max-instances'
+      - '3'
+      - '--concurrency'
+      - '1'
+      - '--timeout'
+      - '600'
+      - '--quiet'
+    id: deploy-worker
+    waitFor: ['push-worker']
+
+images:
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/api:latest'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/worker:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

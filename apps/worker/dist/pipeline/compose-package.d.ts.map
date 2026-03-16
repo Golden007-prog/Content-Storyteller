@@ -1,0 +1,1 @@
+{"version":3,"file":"compose-package.d.ts","sourceRoot":"","sources":["../../src/pipeline/compose-package.ts"],"names":[],"mappings":"AAAA,OAAO,EACL,aAAa,EACb,eAAe,EACf,WAAW,EACX,QAAQ,EAGT,MAAM,6BAA6B,CAAC;AAMrC;;;GAGG;AACH,qBAAa,cAAe,YAAW,aAAa;IAClD,QAAQ,CAAC,IAAI,oBAAoB;IACjC,QAAQ,CAAC,QAAQ,6BAA6B;IAExC,OAAO,CAAC,OAAO,EAAE,eAAe,GAAG,OAAO,CAAC,WAAW,CAAC;CAiD9D"}

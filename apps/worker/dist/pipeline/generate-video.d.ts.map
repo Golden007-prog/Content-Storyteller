@@ -1,0 +1,1 @@
+{"version":3,"file":"generate-video.d.ts","sourceRoot":"","sources":["../../src/pipeline/generate-video.ts"],"names":[],"mappings":"AAAA,OAAO,EACL,aAAa,EACb,eAAe,EACf,WAAW,EACX,QAAQ,EAST,MAAM,6BAA6B,CAAC;AAyMrC;;;;GAIG;AACH,qBAAa,aAAc,YAAW,aAAa;IACjD,QAAQ,CAAC,IAAI,mBAAmB;IAChC,QAAQ,CAAC,QAAQ,4BAA4B;IAEvC,OAAO,CAAC,OAAO,EAAE,eAAe,GAAG,OAAO,CAAC,WAAW,CAAC;CAqK9D"}

@@ -1,0 +1,1 @@
+{"version":3,"file":"generate-copy.d.ts","sourceRoot":"","sources":["../../src/pipeline/generate-copy.ts"],"names":[],"mappings":"AAAA,OAAO,EACL,aAAa,EACb,eAAe,EACf,WAAW,EACX,QAAQ,EAOT,MAAM,6BAA6B,CAAC;AA+HrC;;;GAGG;AACH,qBAAa,YAAa,YAAW,aAAa;IAChD,QAAQ,CAAC,IAAI,kBAAkB;IAC/B,QAAQ,CAAC,QAAQ,2BAA2B;IAEtC,OAAO,CAAC,OAAO,EAAE,eAAe,GAAG,OAAO,CAAC,WAAW,CAAC;CAkE9D"}

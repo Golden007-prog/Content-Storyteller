@@ -1,0 +1,1 @@
+{"version":3,"file":"scoring.d.ts","sourceRoot":"","sources":["../../../src/services/trends/scoring.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,UAAU,EAAE,MAAM,6BAA6B,CAAC;AAC9D,OAAO,KAAK,EAAE,cAAc,EAAE,MAAM,SAAS,CAAC;AAE9C;;;GAGG;AACH,wBAAgB,oBAAoB,CAAC,MAAM,EAAE,cAAc,GAAG,MAAM,CAGnE;AAED;;;GAGG;AACH,wBAAgB,qBAAqB,CAAC,MAAM,EAAE,cAAc,EAAE,KAAK,EAAE,UAAU,GAAG,MAAM,CAqBvF"}

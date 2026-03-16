@@ -1,0 +1,27 @@
+{
+  "name": "content-storyteller",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multimodal AI content generation platform on Google Cloud",
+  "workspaces": [
+    "apps/web",
+    "apps/api",
+    "apps/worker",
+    "packages/shared"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "test:properties": "npm run test:properties --workspaces --if-present",
+    "test:coverage": "npm run test:coverage --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "dev": "npm run build --workspace=packages/shared && npx concurrently --names web,api,worker --prefix-colors blue,green,yellow \"npm run dev --workspace=apps/web\" \"npm run dev --workspace=apps/api\" \"npm run dev --workspace=apps/worker\"",
+    "dev:bash": "bash scripts/dev.sh"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "@content-storyteller/api",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch --env-file=.env src/index.ts",
+    "test": "vitest --run",
+    "test:properties": "vitest --run --grep 'Property'",
+    "test:coverage": "vitest --run --coverage"
+  },
+  "dependencies": {
+    "@content-storyteller/shared": "*",
+    "@google-cloud/firestore": "^7.11.0",
+    "@google/genai": "^1.0.0",
+    "@google-cloud/pubsub": "^4.9.0",
+    "@google-cloud/storage": "^7.15.0",
+    "archiver": "^7.0.1",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "multer": "^1.4.5-lts.1"
+  },
+  "devDependencies": {
+    "@types/archiver": "^7.0.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.11",
+    "fast-check": "^3.19.0",
+    "tsx": "^4.11.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}

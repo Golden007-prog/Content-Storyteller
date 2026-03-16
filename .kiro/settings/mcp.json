@@ -1,4 +1,37 @@
 {
   "mcpServers": {
+    "gcloud": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@google-cloud/gcloud-mcp"
+      ],
+      "disabled": false,
+      "autoApprove": [
+        "run_gcloud_command"
+      ]
+    },
+    "storage": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@google-cloud/storage-mcp"
+      ],
+      "disabled": false,
+      "autoApprove": [
+        "create_bucket",
+        "list_buckets",
+        "list_objects"
+      ]
+    },
+    "observability": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@google-cloud/observability-mcp"
+      ],
+      "disabled": false,
+      "autoApprove": []
+    }
   }
 }

@@ -1,0 +1,114 @@
+# ---------------------------------------------------------------------------
+# cloudbuild.yaml — CI/CD pipeline for Content Storyteller
+# ---------------------------------------------------------------------------
+#
+# Substitution variables:
+#   _REGION       — GCP region (default: us-central1)
+#   _AR_REPO      — Artifact Registry repository name (default: content-storyteller)
+#
+# Usage:
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --substitutions=_REGION=us-central1,_AR_REPO=content-storyteller
+
+substitutions:
+  _REGION: us-central1
+  _AR_REPO: content-storyteller
+
+steps:
+  # 1. Install dependencies
+  - name: 'node:20-alpine'
+    entrypoint: npm
+    args: ['ci']
+    id: install
+
+  # 2. Run tests
+  - name: 'node:20-alpine'
+    entrypoint: npm
+    args: ['test']
+    id: test
+    waitFor: ['install']
+
+  # 3. Build API Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:$SHORT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:latest'
+      - '-f'
+      - 'apps/api/Dockerfile'
+      - '.'
+    id: build-api
+    waitFor: ['test']
+
+  # 4. Build Worker Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:$SHORT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:latest'
+      - '-f'
+      - 'apps/worker/Dockerfile'
+      - '.'
+    id: build-worker
+    waitFor: ['test']
+
+  # 5. Push API image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api'
+    id: push-api
+    waitFor: ['build-api']
+
+  # 6. Push Worker image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker'
+    id: push-worker
+    waitFor: ['build-worker']
+
+  # 7. Deploy API service to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'api-service'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:$SHORT_SHA'
+      - '--region'
+      - '${_REGION}'
+      - '--quiet'
+    id: deploy-api
+    waitFor: ['push-api']
+
+  # 8. Deploy Worker service to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'worker-service'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:$SHORT_SHA'
+      - '--region'
+      - '${_REGION}'
+      - '--quiet'
+    id: deploy-worker
+    waitFor: ['push-worker']
+
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:latest'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
