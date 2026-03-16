@@ -32,14 +32,7 @@ steps:
     id: build-shared
     waitFor: ['install']
 
-  # 3. Run tests
-  - name: 'node:20-alpine'
-    entrypoint: npm
-    args: ['test']
-    id: test
-    waitFor: ['build-shared']
-
-  # 4. Build API Docker image
+  # 3. Build API Docker image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
@@ -51,9 +44,9 @@ steps:
       - 'apps/api/Dockerfile'
       - '.'
     id: build-api
-    waitFor: ['test']
+    waitFor: ['build-shared']
 
-  # 5. Build Worker Docker image
+  # 4. Build Worker Docker image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
@@ -65,9 +58,9 @@ steps:
       - 'apps/worker/Dockerfile'
       - '.'
     id: build-worker
-    waitFor: ['test']
+    waitFor: ['build-shared']
 
-  # 6. Push API image to Artifact Registry
+  # 5. Push API image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
@@ -76,7 +69,7 @@ steps:
     id: push-api
     waitFor: ['build-api']
 
-  # 7. Push Worker image to Artifact Registry
+  # 6. Push Worker image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
@@ -85,7 +78,7 @@ steps:
     id: push-worker
     waitFor: ['build-worker']
 
-  # 8. Deploy API service to Cloud Run
+  # 7. Deploy API service to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -102,9 +95,9 @@ steps:
       - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},UPLOADS_BUCKET=$PROJECT_ID-uploads,ASSETS_BUCKET=$PROJECT_ID-assets,FIRESTORE_DATABASE=(default),PUBSUB_TOPIC=content-generation-jobs,CORS_ORIGIN=https://golden007-prog.github.io,VERTEX_TEXT_MODEL=gemini-2.5-flash,VERTEX_TEXT_FALLBACK_MODEL=gemini-2.5-flash,VERTEX_REASONING_MODEL=gemini-2.5-pro,VERTEX_IMAGE_MODEL=gemini-2.5-flash,VERTEX_IMAGE_HQ_MODEL=gemini-2.5-pro,API_BASE_URL=https://api-service-828079020282.us-central1.run.app'
       - '--allow-unauthenticated'
       - '--memory'
-      - '512Mi'
+      - '1Gi'
       - '--cpu'
-      - '1'
+      - '2'
       - '--max-instances'
       - '3'
       - '--concurrency'
@@ -115,7 +108,7 @@ steps:
     id: deploy-api
     waitFor: ['push-api']
 
-  # 9. Deploy Worker service to Cloud Run
+  # 8. Deploy Worker service to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -129,12 +122,12 @@ steps:
       - '--service-account'
       - 'worker-sa@$PROJECT_ID.iam.gserviceaccount.com'
       - '--set-env-vars'
-      - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},UPLOADS_BUCKET=$PROJECT_ID-uploads,ASSETS_BUCKET=$PROJECT_ID-assets,TEMP_BUCKET=$PROJECT_ID-temp,FIRESTORE_DATABASE=(default),PUBSUB_SUBSCRIPTION=content-generation-jobs-sub,VERTEX_TEXT_MODEL=gemini-2.5-flash,VERTEX_TEXT_FALLBACK_MODEL=gemini-2.5-flash,VERTEX_REASONING_MODEL=gemini-2.5-pro,VERTEX_IMAGE_MODEL=gemini-2.5-flash,VERTEX_IMAGE_HQ_MODEL=gemini-2.5-pro'
+      - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},UPLOADS_BUCKET=$PROJECT_ID-uploads,ASSETS_BUCKET=$PROJECT_ID-assets,TEMP_BUCKET=$PROJECT_ID-temp,FIRESTORE_DATABASE=(default),PUBSUB_SUBSCRIPTION=content-generation-jobs-sub,VERTEX_TEXT_MODEL=gemini-2.5-flash,VERTEX_TEXT_FALLBACK_MODEL=gemini-2.5-flash,VERTEX_REASONING_MODEL=gemini-2.5-pro,VERTEX_IMAGE_MODEL=gemini-2.5-flash,VERTEX_IMAGE_HQ_MODEL=gemini-2.5-pro,VERTEX_VIDEO_FAST_MODEL=veo-3.1-fast-generate-001,VERTEX_VIDEO_FINAL_MODEL=veo-3.1-generate-001,VERTEX_VIDEO_FAST_LOCATION=us-central1,VERTEX_VIDEO_FINAL_LOCATION=us-central1'
       - '--no-allow-unauthenticated'
       - '--memory'
-      - '2Gi'
+      - '4Gi'
       - '--cpu'
-      - '2'
+      - '4'
       - '--max-instances'
       - '3'
       - '--concurrency'

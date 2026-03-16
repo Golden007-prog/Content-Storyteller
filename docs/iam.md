@@ -16,6 +16,7 @@ Used by the API Cloud Run service.
 | `roles/secretmanager.secretAccessor` | Read application secrets from Secret Manager |
 | `roles/logging.logWriter` | Write structured logs to Cloud Logging |
 | `roles/aiplatform.user` | Access Vertex AI Gemini models for content analysis |
+| `roles/iam.serviceAccountTokenCreator` (self) | Sign GCS URLs for asset preview and download |
 
 ### `worker-sa` — Worker Service Account
 

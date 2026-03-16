@@ -89,9 +89,19 @@ export async function generateSignedUrl(storagePath: string): Promise<string> {
       return `http://localhost:${port}/api/v1/assets/${encodeURIComponent(storagePath)}`;
     }
     // Cloud fallback: proxy through the API's own asset endpoint.
-    // API_BASE_URL should be set as an env var on the Cloud Run service
-    // (e.g. https://api-service-aqzftcmcyq-uc.a.run.app).
-    const apiBaseUrl = process.env.API_BASE_URL || '';
+    // Try API_BASE_URL first, then auto-discover from Cloud Run metadata.
+    let apiBaseUrl = process.env.API_BASE_URL || '';
+    if (!apiBaseUrl) {
+      // Cloud Run provides K_SERVICE (service name) and we can construct the URL
+      // Format: https://{service}-{project-number}.{region}.run.app
+      // However, project number isn't directly available, so we use a simpler approach:
+      // The service URL is available via the Cloud Run metadata server, but that's async.
+      // For now, log a warning and throw — the deployment should set API_BASE_URL.
+      logger.warn('API_BASE_URL not set in cloud environment — signed URL fallback unavailable', {
+        storagePath,
+        kService: process.env.K_SERVICE,
+      });
+    }
     if (apiBaseUrl) {
       return `${apiBaseUrl}/api/v1/assets/${encodeURIComponent(storagePath)}`;
     }
