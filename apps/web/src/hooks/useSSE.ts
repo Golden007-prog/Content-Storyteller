@@ -2,6 +2,9 @@ import { useEffect, useRef, useCallback } from 'react';
 import type { StreamEventShape } from '@content-storyteller/shared';
 import { createSSEConnection } from '../api/client';
 
+// Max reconnect attempts before giving up (prevents infinite loops)
+const MAX_RECONNECT_ATTEMPTS = 5;
+
 /**
  * Extract media URLs from SSE asset references by filtering on assetType.
  * Returns imageUrls (from 'image' assets), videoUrl (from 'video' assets),
@@ -105,15 +108,21 @@ export function useSSE({ jobId, enabled = true, callbacks }: UseSSEOptions): voi
         cleanup();
       });
 
-      source.onerror = (event: Event) => {
-        callbacksRef.current.onError?.(event);
+      source.onerror = (_event: Event) => {
+        // Don't fire onError for transient reconnectable errors — only fire
+        // after we've exhausted reconnect attempts so the UI doesn't reset
+        // to the landing page during long video generation.
 
-        // Reconnect with exponential backoff if not a terminal close
         if (source.readyState === EventSource.CLOSED) {
           const attempt = reconnectAttemptRef.current;
-          const delay = Math.min(1000 * 2 ** attempt, 30000);
-          reconnectAttemptRef.current = attempt + 1;
-          reconnectTimerRef.current = setTimeout(connect, delay);
+          if (attempt < MAX_RECONNECT_ATTEMPTS) {
+            const delay = Math.min(1000 * 2 ** attempt, 30000);
+            reconnectAttemptRef.current = attempt + 1;
+            reconnectTimerRef.current = setTimeout(connect, delay);
+          } else {
+            // Exhausted retries — now surface the error to the UI
+            callbacksRef.current.onError?.(_event);
+          }
         }
       };
     };

@@ -18,6 +18,7 @@ import { logger } from '../middleware/logger';
 const router = Router();
 
 const POLL_INTERVAL_MS = 2000;
+const KEEPALIVE_INTERVAL_MS = 25000; // Send keepalive every 25s to prevent idle timeouts
 const TERMINAL_STATES = new Set<string>([JobState.Completed, JobState.Failed]);
 
 /**
@@ -416,6 +417,7 @@ router.get('/:jobId/stream', async (req: Request, res: Response, next: NextFunct
       try {
         const currentJob = await getJob(jobId);
         if (!currentJob) {
+          clearInterval(keepaliveTimer);
           sendEvent({
             event: 'error',
             data: {
@@ -456,6 +458,7 @@ router.get('/:jobId/stream', async (req: Request, res: Response, next: NextFunct
         }
 
         if (TERMINAL_STATES.has(currentJob.state)) {
+          clearInterval(keepaliveTimer);
           const terminalSignedAssets = await signAssetsForSSE(currentJob.assets);
           sendEvent({
             event: currentJob.state === JobState.Completed ? 'complete' : 'failed',
@@ -482,15 +485,26 @@ router.get('/:jobId/stream', async (req: Request, res: Response, next: NextFunct
         logger.error(`SSE poll error for job ${jobId}`, {
           correlationId: req.correlationId,
         });
+        clearInterval(keepaliveTimer);
         res.end();
       }
     };
 
     let pollTimer: ReturnType<typeof setTimeout>;
 
+    // Send SSE keepalive comments to prevent idle connection timeouts
+    const keepaliveTimer = setInterval(() => {
+      try {
+        res.write(':keepalive\n\n');
+      } catch {
+        // Connection already closed, cleanup will handle it
+      }
+    }, KEEPALIVE_INTERVAL_MS);
+
     // Clean up on client disconnect
     req.on('close', () => {
       clearTimeout(pollTimer);
+      clearInterval(keepaliveTimer);
       logger.info(`SSE connection closed for job ${jobId}`, {
         correlationId: req.correlationId,
       });
