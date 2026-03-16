@@ -21,14 +21,21 @@ steps:
     args: ['ci']
     id: install
 
-  # 2. Run tests
+  # 2. Build shared package (required before tests — other workspaces import from it)
+  - name: 'node:20-alpine'
+    entrypoint: npm
+    args: ['run', 'build', '--workspace=packages/shared']
+    id: build-shared
+    waitFor: ['install']
+
+  # 3. Run tests
   - name: 'node:20-alpine'
     entrypoint: npm
     args: ['test']
     id: test
-    waitFor: ['install']
+    waitFor: ['build-shared']
 
-  # 3. Build API Docker image
+  # 4. Build API Docker image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
@@ -42,7 +49,7 @@ steps:
     id: build-api
     waitFor: ['test']
 
-  # 4. Build Worker Docker image
+  # 5. Build Worker Docker image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
@@ -56,7 +63,7 @@ steps:
     id: build-worker
     waitFor: ['test']
 
-  # 5. Push API image to Artifact Registry
+  # 6. Push API image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
@@ -65,7 +72,7 @@ steps:
     id: push-api
     waitFor: ['build-api']
 
-  # 6. Push Worker image to Artifact Registry
+  # 7. Push Worker image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
@@ -74,7 +81,7 @@ steps:
     id: push-worker
     waitFor: ['build-worker']
 
-  # 7. Deploy API service to Cloud Run
+  # 8. Deploy API service to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -89,7 +96,7 @@ steps:
     id: deploy-api
     waitFor: ['push-api']
 
-  # 8. Deploy Worker service to Cloud Run
+  # 9. Deploy Worker service to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
