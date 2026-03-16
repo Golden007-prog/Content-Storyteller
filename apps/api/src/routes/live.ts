@@ -87,6 +87,7 @@ router.post('/input', async (req: Request, res: Response, next: NextFunction) =>
     const response: LiveInputResponse = {
       sessionId,
       agentText: result.agentText,
+      audioBase64: result.audioBase64,
       transcript: result.transcript,
     };
     res.json(response);

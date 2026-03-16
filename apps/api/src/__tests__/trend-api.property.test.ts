@@ -83,6 +83,7 @@ vi.mock('@google/genai', () => {
     GoogleGenAI: vi.fn().mockImplementation(() => ({
       models: { generateContent: mockGenerateContent },
     })),
+    Type: { STRING: 'STRING', OBJECT: 'OBJECT', NUMBER: 'NUMBER', INTEGER: 'INTEGER', BOOLEAN: 'BOOLEAN', ARRAY: 'ARRAY' },
   };
 });
 

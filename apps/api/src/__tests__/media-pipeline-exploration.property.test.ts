@@ -90,9 +90,14 @@ vi.mock('@google-cloud/pubsub', () => ({
 vi.mock('@google/genai', () => ({
   GoogleGenAI: vi.fn().mockImplementation(() => ({
     models: {
-      generateContent: vi.fn().mockResolvedValue({ text: 'Mock response' }),
+      generateContent: vi.fn().mockImplementation((req: Record<string, unknown>) => {
+        // Store the last request config so tests can inspect systemInstruction / tools
+        (globalThis as any).__lastGenaiRequest = req;
+        return Promise.resolve({ text: 'Mock response', candidates: [] });
+      }),
     },
   })),
+  Type: { STRING: 'STRING', OBJECT: 'OBJECT', NUMBER: 'NUMBER', INTEGER: 'INTEGER', BOOLEAN: 'BOOLEAN', ARRAY: 'ARRAY' },
 }));
 
 vi.mock('../services/genai', () => ({
@@ -524,11 +529,23 @@ describe('Defect 8 (PBT): Live Agent integrates Trend Analyzer data', () => {
     // The request should succeed (200)
     expect(result.status).toBe(200);
 
-    // EXPECTED: The prompt sent to Gemini should include trend data
-    // (i.e., the system should have queried Trend Analyzer and included results)
-    // WILL FAIL on unfixed code: the prompt is a generic Creative Director prompt
-    // without any trend data integration
+    // EXPECTED: The Gemini SDK request should include a system instruction
+    // referencing trends (via the LIVE_AGENT_SYSTEM_INSTRUCTION constant)
+    // and/or the tools array should include fetch_platform_trends.
+    // The new function-calling architecture uses the SDK directly with
+    // systemInstruction and tools config rather than embedding trend data
+    // in the prompt text.
+    const lastReq = (globalThis as any).__lastGenaiRequest as Record<string, unknown> | undefined;
+    const configObj = (lastReq?.config ?? {}) as Record<string, unknown>;
+    const sysInstruction = String(configObj.systemInstruction ?? '');
+    const toolsJson = JSON.stringify(configObj.tools ?? []);
+    const userText = JSON.stringify(lastReq?.contents ?? '');
+
     const promptIncludesTrendData =
+      sysInstruction.includes('trend') ||
+      sysInstruction.includes('Trend') ||
+      toolsJson.includes('fetch_platform_trends') ||
+      userText.includes('trending') ||
       capturedPrompt.includes('trend') ||
       capturedPrompt.includes('Trend') ||
       capturedPrompt.includes('trending') ||

@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback } from 'react';
 import { startLiveSession, sendLiveInput, stopLiveSession } from '../api/client';
 import type { TranscriptEntry, ExtractedCreativeDirection } from '@content-storyteller/shared';
 import { HeroSection } from './layout/HeroSection';
+import { AudioEqualizer } from './AudioEqualizer';
 
 interface LiveAgentPanelProps {
   onUseCreativeDirection: (direction: ExtractedCreativeDirection) => void;
@@ -16,10 +17,17 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
   const [error, setError] = useState<string | null>(null);
   const [extractedDirection, setExtractedDirection] = useState<ExtractedCreativeDirection | null>(null);
   const [sessionEnded, setSessionEnded] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const recognitionRef = useRef<any>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
-  React.useEffect(() => { transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [transcript]);
+  React.useEffect(() => { transcriptEndRef.current?.scrollIntoView?.({ behavior: 'smooth' }); }, [transcript]);
+
+  React.useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    setSpeechSupported(!!SR);
+  }, []);
 
   const handleStartSession = useCallback(async () => {
     setError(null); setTranscript([]); setExtractedDirection(null); setSessionEnded(false);
@@ -30,7 +38,23 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
   const handleSendText = useCallback(async () => {
     if (!sessionId || !inputText.trim() || isProcessing) return;
     setError(null); setIsProcessing(true);
-    try { const res = await sendLiveInput(sessionId, inputText.trim()); setTranscript(res.transcript); setInputText(''); }
+    try {
+      const res = await sendLiveInput(sessionId, inputText.trim());
+      setTranscript(res.transcript);
+      setInputText('');
+
+      // Play audio if available
+      if (res.audioBase64) {
+        try {
+          const audio = new Audio(`data:audio/pcm;base64,${res.audioBase64}`);
+          audio.onended = () => setIsSpeaking(false);
+          setIsSpeaking(true);
+          await audio.play();
+        } catch {
+          setIsSpeaking(false);
+        }
+      }
+    }
     catch (err) { setError(err instanceof Error ? err.message : 'Failed to send input'); }
     finally { setIsProcessing(false); }
   }, [sessionId, inputText, isProcessing]);
@@ -47,15 +71,38 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
     finally { setIsProcessing(false); }
   }, [sessionId]);
 
-  const toggleMic = useCallback(async () => {
-    if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      recorder.ondataavailable = () => {};
-      recorder.onstop = () => { stream.getTracks().forEach((t) => t.stop()); };
-      recorder.start(); mediaRecorderRef.current = recorder; setIsRecording(true);
-    } catch { setError('Microphone access denied. Please type your message instead.'); }
+  const toggleMic = useCallback(() => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      setError('Speech recognition is not supported in this browser. Please type your message instead.');
+      return;
+    }
+    const recognition = new SR();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.onresult = (event: any) => {
+      const results = event.results;
+      let transcript = '';
+      for (let i = 0; i < results.length; i++) {
+        transcript += results[i][0].transcript;
+      }
+      setInputText(transcript);
+    };
+    recognition.onerror = () => {
+      setIsRecording(false);
+      setError('Speech recognition error. Please try again or type your message.');
+    };
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsRecording(true);
   }, [isRecording]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -170,6 +217,11 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
                         : 'bg-gray-50 border border-gray-100 text-gray-800 rounded-bl-md'
                     }`}>
                       {renderMessageWithTrendIndicators(entry.text, entry.role)}
+                      {entry.role === 'agent' && i === transcript.length - 1 && (
+                        <span className="inline-block ml-2 align-middle">
+                          <AudioEqualizer active={isSpeaking} />
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}

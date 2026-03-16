@@ -40,6 +40,7 @@ export interface StartLiveSessionResponse {
 export interface LiveInputResponse {
   sessionId: string;
   agentText: string;
+  audioBase64: string | null;
   transcript: TranscriptEntry[];
 }
 

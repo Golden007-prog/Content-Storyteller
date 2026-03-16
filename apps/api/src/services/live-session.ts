@@ -10,12 +10,35 @@ import {
   TrendItem,
 } from '@content-storyteller/shared';
 import type { TrendDomain, TrendQuery } from '@content-storyteller/shared';
+import { GoogleGenAI, Type } from '@google/genai';
 import { logger } from '../middleware/logger';
 import { getGcpConfig } from '../config/gcp';
 import { generateContent } from './genai';
 import { analyzeTrends } from './trends/analyzer';
 import { isAlloyDbConfigured } from './firestore';
 import { getPool } from './alloydb';
+
+export const FETCH_TRENDS_TOOL = {
+  functionDeclarations: [{
+    name: 'fetch_platform_trends',
+    description: 'Fetch current trending topics for a given social media platform.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        platform: {
+          type: Type.STRING,
+          description: 'Target platform: instagram_reels, x_twitter, linkedin, or all_platforms',
+        },
+      },
+      required: ['platform'],
+    },
+  }],
+};
+
+export const LIVE_AGENT_SYSTEM_INSTRUCTION =
+  'You are an AI Creative Director. If a user asks for current trends, ' +
+  'ask them which platform they want. Then, use the fetch_platform_trends tool. ' +
+  'While waiting for the tool, inform the user you are fetching the data.';
 
 function getDb(): Firestore {
   const cfg = getGcpConfig();
@@ -149,64 +172,24 @@ export async function appendTranscript(
 
 /**
  * Process user input through Gemini and return agent response.
- * Integrates Trend Analyzer when platform/domain keywords are detected.
- * Uses the shared genai.ts module (Vertex AI primary, API key fallback).
+ * Delegates to generateAgentResponse which handles Vertex AI function calling
+ * (including autonomous trend-fetching via fetch_platform_trends tool).
  */
 export async function processLiveInput(
   sessionId: string,
   userText: string,
-): Promise<{ agentText: string; transcript: TranscriptEntry[] }> {
+): Promise<{ agentText: string; audioBase64: string | null; transcript: TranscriptEntry[] }> {
   const now = new Date().toISOString();
 
   const userEntry: TranscriptEntry = { role: 'user', text: userText, timestamp: now };
   const transcriptAfterUser = await appendTranscript(sessionId, userEntry);
 
-  // Detect trend intent and fetch trend data before generating response
-  let trendSection = '';
-  const { platform, domain, hasTrendIntent } = detectTrendKeywords(userText);
-
-  if (hasTrendIntent) {
-    const trendQuery: TrendQuery = {
-      platform: platform || TrendPlatform.AllPlatforms,
-      domain: domain || 'tech',
-      region: { scope: 'global' },
-    };
-    try {
-      const trendResult = await analyzeTrends(trendQuery);
-
-      // Record successful tool invocation to AlloyDB (best-effort)
-      recordToolInvocation(
-        sessionId,
-        'analyzeTrends',
-        trendQuery as unknown as Record<string, unknown>,
-        { trendCount: trendResult.trends.length, platform: trendResult.platform, domain: trendResult.domain },
-        'completed',
-      ).catch(() => { /* best-effort, already logged internally */ });
-
-      if (trendResult.trends.length > 0) {
-        trendSection = `\n\n--- CURRENT TREND DATA ---\nPlatform: ${trendResult.platform} | Domain: ${trendResult.domain}\nSummary: ${trendResult.summary}\n\nTop Trends:\n${formatTrendsForPrompt(trendResult.trends)}\n--- END TREND DATA ---\n\nUse the trend data above to provide specific, data-driven creative direction. Reference specific trends, suggest relevant hashtags, and recommend content angles based on what's currently trending.`;
-      }
-    } catch (err) {
-      // Record failed tool invocation to AlloyDB (best-effort)
-      recordToolInvocation(
-        sessionId,
-        'analyzeTrends',
-        trendQuery as unknown as Record<string, unknown>,
-        { error: (err as Error).message },
-        'failed',
-      ).catch(() => { /* best-effort, already logged internally */ });
-
-      logger.warn('Failed to fetch trends for live agent', { error: err });
-      // Even if full trend analysis fails, include trend-aware context
-      const platformLabel = platform || 'all platforms';
-      const domainLabel = domain || 'general';
-      trendSection = `\n\n--- TREND CONTEXT ---\nThe user is asking about trending content. Platform: ${platformLabel} | Domain: ${domainLabel}\nProvide trend-aware creative direction with hashtag suggestions and momentum insights.\n--- END TREND CONTEXT ---`;
-    }
-  }
-
   let agentText: string;
+  let audioBase64: string | null = null;
   try {
-    agentText = await generateAgentResponse(transcriptAfterUser, trendSection);
+    const agentResponse = await generateAgentResponse(transcriptAfterUser, sessionId);
+    agentText = agentResponse.agentText;
+    audioBase64 = agentResponse.audioBase64;
   } catch (err) {
     if (err instanceof ModelUnavailableError) {
       throw err;
@@ -222,7 +205,7 @@ export async function processLiveInput(
   };
   const finalTranscript = await appendTranscript(sessionId, agentEntry);
 
-  return { agentText, transcript: finalTranscript };
+  return { agentText, audioBase64, transcript: finalTranscript };
 }
 
 /**
@@ -339,34 +322,107 @@ function formatTrendsForPrompt(trends: TrendItem[]): string {
 }
 
 /**
- * Generate a conversational creative-director response via Gemini.
- * Includes trend data in the prompt when available.
- * Uses the shared generateContent (Vertex AI primary path).
+ * Generate a conversational creative-director response via Gemini with function calling.
+ * Uses Vertex AI native tool-use so Gemini can autonomously invoke fetch_platform_trends.
+ * Returns both text and optional base64 audio.
  */
-async function generateAgentResponse(transcript: TranscriptEntry[], trendSection: string = ''): Promise<string> {
+export async function generateAgentResponse(
+  transcript: TranscriptEntry[],
+  sessionId: string,
+): Promise<{ agentText: string; audioBase64: string | null }> {
   let model: string;
   try {
     model = getModel('live');
   } catch {
-    // Fallback model when router not initialized
     model = 'gemini-2.0-flash-001';
   }
 
-  const conversationHistory = transcript
-    .map((t) => `${t.role === 'user' ? 'User' : 'Creative Director'}: ${t.text}`)
-    .join('\n');
+  const cfg = getGcpConfig();
+  const genai = cfg.geminiApiKey
+    ? new GoogleGenAI({ apiKey: cfg.geminiApiKey })
+    : new GoogleGenAI({ vertexai: true, project: cfg.projectId, location: cfg.location });
 
-  const prompt = `You are a Creative Director assistant helping a user brainstorm marketing content.
-Based on the conversation so far, provide a helpful, concise response that guides them toward
-defining their creative direction (platform, tone, key themes, campaign angle).
-${trendSection}
-Conversation:
-${conversationHistory}
+  const contents = transcript.map((t) => ({
+    role: t.role === 'user' ? 'user' : 'model',
+    parts: [{ text: t.text }],
+  }));
 
-Creative Director:`;
+  let response = await genai.models.generateContent({
+    model,
+    contents,
+    config: {
+      tools: [FETCH_TRENDS_TOOL],
+      systemInstruction: LIVE_AGENT_SYSTEM_INSTRUCTION,
+      responseModalities: ['AUDIO', 'TEXT'],
+    },
+  });
 
-  const result = await generateContent(prompt, model);
-  return result.trim() || 'Could you tell me more about what you\'re looking to create?';
+  // Tool execution loop: handle function calls from Gemini
+  if (response.functionCalls && response.functionCalls.length > 0) {
+    const fc = response.functionCalls[0];
+    const platform = (fc.args as Record<string, unknown>)?.platform as string || 'all_platforms';
+
+    let trendResult: Record<string, unknown>;
+    let status = 'completed';
+    try {
+      const trendQuery = {
+        platform: platform as any,
+        domain: 'tech' as const,
+        region: { scope: 'global' as const },
+      };
+      const result = await analyzeTrends(trendQuery);
+      trendResult = { trendCount: result.trends.length, platform: result.platform, domain: result.domain, summary: result.summary, trends: result.trends };
+    } catch (err) {
+      status = 'failed';
+      trendResult = { error: (err as Error).message };
+    }
+
+    // Record tool invocation (best-effort)
+    recordToolInvocation(
+      sessionId,
+      'fetch_platform_trends',
+      { platform },
+      trendResult,
+      status,
+    ).catch(() => {});
+
+    // Feed function response back to Gemini
+    const functionResponseContent = {
+      role: 'user' as const,
+      parts: [{
+        functionResponse: {
+          name: fc.name,
+          response: trendResult,
+        },
+      }],
+    };
+
+    response = await genai.models.generateContent({
+      model,
+      contents: [...contents, { role: 'model', parts: [{ functionCall: fc }] }, functionResponseContent],
+      config: {
+        tools: [FETCH_TRENDS_TOOL],
+        systemInstruction: LIVE_AGENT_SYSTEM_INSTRUCTION,
+        responseModalities: ['AUDIO', 'TEXT'],
+      },
+    });
+  }
+
+  // Extract text and audio from response
+  const agentText = response.text?.trim() || 'Could you tell me more about what you\'re looking to create?';
+
+  let audioBase64: string | null = null;
+  if (response.candidates && response.candidates.length > 0) {
+    const parts = response.candidates[0].content?.parts || [];
+    for (const part of parts) {
+      if ((part as any).inlineData?.mimeType?.startsWith('audio/')) {
+        audioBase64 = (part as any).inlineData.data;
+        break;
+      }
+    }
+  }
+
+  return { agentText, audioBase64 };
 }
 
 /**

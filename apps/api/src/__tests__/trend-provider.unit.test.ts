@@ -14,6 +14,7 @@ vi.mock('@google/genai', () => ({
       generateContent: vi.fn().mockResolvedValue({ text: '[]' }),
     },
   })),
+  Type: { STRING: 'STRING', OBJECT: 'OBJECT', NUMBER: 'NUMBER', INTEGER: 'INTEGER', BOOLEAN: 'BOOLEAN', ARRAY: 'ARRAY' },
 }));
 
 vi.mock('../services/genai', () => ({

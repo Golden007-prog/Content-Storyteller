@@ -94,6 +94,7 @@ vi.mock('@google/genai', () => ({
       }),
     },
   })),
+  Type: { STRING: 'STRING', OBJECT: 'OBJECT', NUMBER: 'NUMBER', INTEGER: 'INTEGER', BOOLEAN: 'BOOLEAN', ARRAY: 'ARRAY' },
 }));
 
 import { app } from '../index';

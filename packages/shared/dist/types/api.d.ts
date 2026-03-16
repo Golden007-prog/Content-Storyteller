@@ -70,6 +70,17 @@ export interface StreamEventShape {
 }
 export interface AssetReferenceWithUrl extends AssetReference {
     signedUrl: string;
+    isFallback?: boolean;
+    previewUrl?: string;
+    downloadUrl?: string;
+    title?: string;
+    mimeType?: string;
+    fileSize?: number;
+    width?: number;
+    height?: number;
+    durationSeconds?: number;
+    sourceModel?: string;
+    urlError?: string;
 }
 export interface ErrorResponse {
     error: {
