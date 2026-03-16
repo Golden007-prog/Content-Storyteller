@@ -150,6 +150,12 @@ export class VideoGenerationCapability implements GenerationCapability {
 
   /**
    * Poll the Vertex AI long-running operation until completion or timeout.
+   *
+   * Uses the official Veo fetchPredictOperation endpoint (POST) instead of
+   * a GET on the operation path (which returns 404).
+   *
+   * Ref: https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/veo-video-generation
+   *
    * Uses gentle backoff: 10s → 15s → 20s → 25s → 30s (cap) after transient errors.
    * Resets interval to 10s after a successful (OK) poll response.
    * Refreshes the access token every 5 minutes to avoid token expiry during long polls.
@@ -161,7 +167,19 @@ export class VideoGenerationCapability implements GenerationCapability {
     accessToken: string,
     timeoutMs: number = VIDEO_DEFAULT_TIMEOUT_MS,
   ): Promise<string | { timeout: true; reason: string; pollCount: number; elapsedMs: number; operationName: string } | null> {
-    const pollEndpoint = `https://${getLocation('videoFinal')}-aiplatform.googleapis.com/v1/${operationName}`;
+    // Extract model path from operationName to build the fetchPredictOperation URL.
+    // operationName format: projects/.../locations/.../publishers/google/models/<MODEL>/operations/<OP_ID>
+    const modelMatch = operationName.match(/^(projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+)\//);
+    if (!modelMatch) {
+      console.log(JSON.stringify({ level: 'error', msg: 'Cannot parse model path from operationName', operationName }));
+      throw new Error(`Invalid operationName format: ${operationName}`);
+    }
+    const modelPath = modelMatch[1];
+    const loc = getLocation('videoFinal');
+    const pollEndpoint = `https://${loc}-aiplatform.googleapis.com/v1/${modelPath}:fetchPredictOperation`;
+
+    console.log(JSON.stringify({ level: 'info', msg: 'Veo poll endpoint resolved', pollEndpoint, operationName }));
+
     const deadline = Date.now() + timeoutMs;
     const startTime = Date.now();
     let pollCount = 0;
@@ -195,8 +213,12 @@ export class VideoGenerationCapability implements GenerationCapability {
       let pollResponse: Response;
       try {
         pollResponse = await fetch(pollEndpoint, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${currentToken}` },
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${currentToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ operationName }),
         });
       } catch (fetchErr) {
         // Network error — treat as transient, continue polling
@@ -218,6 +240,20 @@ export class VideoGenerationCapability implements GenerationCapability {
       if (!pollResponse.ok) {
         const errorText = await pollResponse.text();
         consecutiveTransientErrors++;
+
+        // 404 means the endpoint or operation is genuinely not found — abort immediately
+        if (pollResponse.status === 404) {
+          console.log(JSON.stringify({
+            level: 'error',
+            msg: 'Veo poll returned 404 — operation not found, aborting',
+            pollEndpoint,
+            operationName,
+            pollCount,
+            elapsedMs,
+            errorText,
+          }));
+          throw new Error(`Veo poll 404: operation not found at ${pollEndpoint}. operationName=${operationName}`);
+        }
 
         // Gentle backoff: add 5s per transient error, cap at 30s
         currentIntervalMs = Math.min(currentIntervalMs + 5_000, VIDEO_POLL_INTERVAL_CAP_MS);
@@ -265,10 +301,19 @@ export class VideoGenerationCapability implements GenerationCapability {
       const pollResult = await pollResponse.json() as {
         done?: boolean;
         response?: {
+          // Veo fetchPredictOperation returns videos[] (not predictions[])
+          videos?: Array<{
+            bytesBase64Encoded?: string;
+            gcsUri?: string;
+            mimeType?: string;
+          }>;
+          // Legacy/fallback: some versions may use predictions[]
           predictions?: Array<{
             bytesBase64Encoded?: string;
             mimeType?: string;
           }>;
+          raiMediaFilteredCount?: number;
+          raiMediaFilteredReasons?: string[];
         };
         error?: { code?: number; message?: string };
       };
@@ -281,10 +326,22 @@ export class VideoGenerationCapability implements GenerationCapability {
       }
 
       if (pollResult.done) {
+        // Try videos[] first (official Veo response format), then predictions[] as fallback
+        const videos = pollResult.response?.videos;
+        if (videos && videos.length > 0 && videos[0].bytesBase64Encoded) {
+          return videos[0].bytesBase64Encoded;
+        }
         const predictions = pollResult.response?.predictions;
         if (predictions && predictions.length > 0 && predictions[0].bytesBase64Encoded) {
           return predictions[0].bytesBase64Encoded;
         }
+
+        // Check if RAI filtered all results
+        const raiCount = pollResult.response?.raiMediaFilteredCount ?? 0;
+        if (raiCount > 0) {
+          console.log(JSON.stringify({ level: 'warn', msg: 'Veo video filtered by RAI policy', raiCount, reasons: pollResult.response?.raiMediaFilteredReasons }));
+        }
+
         // Done but no video data
         return null;
       }
