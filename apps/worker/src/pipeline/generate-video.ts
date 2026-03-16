@@ -348,9 +348,20 @@ export class GenerateVideo implements PipelineStage {
       if (isAvailable && videoCapability) {
         log.info('Video generation capability available, attempting video generation');
         try {
+          // Calculate remaining pipeline time to cap video generation timeout
+          const pipelineStartTime = context.workingData._pipelineStartTime as number | undefined;
+          const pipelineTimeoutMs = context.workingData._pipelineTimeoutMs as number | undefined;
+          let videoTimeoutMs: number | undefined;
+          if (pipelineStartTime && pipelineTimeoutMs) {
+            const elapsed = Date.now() - pipelineStartTime;
+            // Leave 60s headroom for post-video stages (GIF, ComposePackage)
+            videoTimeoutMs = Math.max(60_000, pipelineTimeoutMs - elapsed - 60_000);
+            log.info('Video generation timeout calculated', { videoTimeoutMs, elapsed, pipelineTimeoutMs });
+          }
+
           const genResult = await videoCapability.generate({
             jobId: context.jobId,
-            data: { brief, storyboard, videoBrief },
+            data: { brief, storyboard, videoBrief, timeoutMs: videoTimeoutMs },
           });
 
           if (genResult.success && genResult.assets.length > 0) {

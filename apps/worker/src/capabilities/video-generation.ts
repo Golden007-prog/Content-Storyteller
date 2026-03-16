@@ -13,7 +13,7 @@ import { getGcpConfig } from '../config/gcp';
 
 const VIDEO_POLL_INTERVAL_BASE_MS = 15_000; // initial poll interval
 const VIDEO_POLL_INTERVAL_CAP_MS = 120_000; // max poll interval after backoff
-const VIDEO_TIMEOUT_MS = Number(process.env.VIDEO_GENERATION_TIMEOUT_MS) || 10 * 60 * 1000; // configurable, default 10 min
+const VIDEO_DEFAULT_TIMEOUT_MS = Number(process.env.VIDEO_GENERATION_TIMEOUT_MS) || 10 * 60 * 1000; // configurable, default 10 min
 const CONSECUTIVE_TRANSIENT_WARN_THRESHOLD = 5;
 
 /**
@@ -63,6 +63,10 @@ export class VideoGenerationCapability implements GenerationCapability {
     const brief = data.brief as CreativeBrief | undefined;
     const storyboard = data.storyboard as Storyboard | undefined;
     const videoBrief = data.videoBrief as VideoBrief | undefined;
+    // Allow caller to pass a custom timeout (e.g., remaining pipeline time)
+    const timeoutMs = typeof data.timeoutMs === 'number' && data.timeoutMs > 0
+      ? data.timeoutMs
+      : VIDEO_DEFAULT_TIMEOUT_MS;
 
     const prompt = buildVeoPrompt(brief, storyboard, videoBrief);
 
@@ -113,8 +117,8 @@ export class VideoGenerationCapability implements GenerationCapability {
         throw new Error('Veo API did not return an operation name');
       }
 
-      // Poll for completion with 5-minute timeout
-      const videoData = await this.pollForCompletion(operationName, accessToken);
+      // Poll for completion with dynamic timeout
+      const videoData = await this.pollForCompletion(operationName, accessToken, timeoutMs);
 
       if (!videoData || typeof videoData === 'object') {
         const timeoutMeta = typeof videoData === 'object' && videoData !== null ? videoData : undefined;
@@ -154,9 +158,10 @@ export class VideoGenerationCapability implements GenerationCapability {
   private async pollForCompletion(
     operationName: string,
     accessToken: string,
+    timeoutMs: number = VIDEO_DEFAULT_TIMEOUT_MS,
   ): Promise<string | { timeout: true; reason: string; pollCount: number; elapsedMs: number; operationName: string } | null> {
     const pollEndpoint = `https://${getLocation('videoFinal')}-aiplatform.googleapis.com/v1/${operationName}`;
-    const deadline = Date.now() + VIDEO_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
     const startTime = Date.now();
     let pollCount = 0;
     let currentIntervalMs = VIDEO_POLL_INTERVAL_BASE_MS;
@@ -233,7 +238,7 @@ export class VideoGenerationCapability implements GenerationCapability {
 
     // Timeout reached — log structured warning
     const totalElapsed = Date.now() - startTime;
-    console.log(JSON.stringify({ level: 'warn', msg: 'Veo polling timeout', pollCount, elapsedMs: totalElapsed, currentIntervalMs, operationName, timeoutMs: VIDEO_TIMEOUT_MS }));
+    console.log(JSON.stringify({ level: 'warn', msg: 'Veo polling timeout', pollCount, elapsedMs: totalElapsed, currentIntervalMs, operationName, timeoutMs }));
     return { timeout: true, reason: 'video-generation-timeout', pollCount, elapsedMs: totalElapsed, operationName };
   }
 }

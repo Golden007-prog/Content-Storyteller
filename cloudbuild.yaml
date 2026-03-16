@@ -110,7 +110,7 @@ steps:
       - '--concurrency'
       - '80'
       - '--timeout'
-      - '600'
+      - '900'
       - '--quiet'
     id: deploy-api
     waitFor: ['push-api']
@@ -132,7 +132,7 @@ steps:
       - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},UPLOADS_BUCKET=$PROJECT_ID-uploads,ASSETS_BUCKET=$PROJECT_ID-assets,TEMP_BUCKET=$PROJECT_ID-temp,FIRESTORE_DATABASE=(default),PUBSUB_SUBSCRIPTION=content-generation-jobs-sub,VERTEX_TEXT_MODEL=gemini-2.5-flash,VERTEX_TEXT_FALLBACK_MODEL=gemini-2.5-flash,VERTEX_REASONING_MODEL=gemini-2.5-pro,VERTEX_IMAGE_MODEL=gemini-2.5-flash,VERTEX_IMAGE_HQ_MODEL=gemini-2.5-pro'
       - '--no-allow-unauthenticated'
       - '--memory'
-      - '1Gi'
+      - '2Gi'
       - '--cpu'
       - '2'
       - '--max-instances'
@@ -140,7 +140,7 @@ steps:
       - '--concurrency'
       - '1'
       - '--timeout'
-      - '600'
+      - '900'
       - '--quiet'
     id: deploy-worker
     waitFor: ['push-worker']

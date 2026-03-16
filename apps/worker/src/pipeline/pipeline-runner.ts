@@ -21,8 +21,8 @@ import { GenerateVideo } from './generate-video';
 import { GenerateGif } from './generate-gif';
 import { ComposePackage } from './compose-package';
 
-/** Maximum pipeline execution time: 10 minutes */
-const PIPELINE_TIMEOUT_MS = 10 * 60 * 1000;
+/** Maximum pipeline execution time: 14 minutes (leaves 1 min headroom for Cloud Run's 900s timeout) */
+const PIPELINE_TIMEOUT_MS = 14 * 60 * 1000;
 
 /**
  * Configuration for a single pipeline stage, mapping it to its
@@ -91,6 +91,10 @@ export async function runPipeline(context: PipelineContext): Promise<void> {
   const startTime = Date.now();
 
   log.info('Pipeline started', { stageCount: STAGE_CONFIGS.length });
+
+  // Store pipeline start time in workingData so stages can calculate remaining time
+  context.workingData._pipelineStartTime = startTime;
+  context.workingData._pipelineTimeoutMs = PIPELINE_TIMEOUT_MS;
 
   // Read the Job document to get outputIntent
   const job = await getJob(context.jobId);
