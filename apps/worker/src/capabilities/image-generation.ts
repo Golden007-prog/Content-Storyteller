@@ -8,6 +8,22 @@ import {
 } from '@content-storyteller/shared';
 import { getGcpConfig } from '../config/gcp';
 
+const IMAGE_MAX_RETRIES = 3;
+const IMAGE_INITIAL_RETRY_DELAY_MS = 3000;
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status === 503;
+}
+
+function isRetryableMessage(text: string): boolean {
+  const lower = text.toLowerCase();
+  return lower.includes('resource_exhausted') || lower.includes('429') || lower.includes('quota') || lower.includes('503');
+}
+
 /**
  * Image generation capability backed by Vertex AI Imagen API.
  * Uses the Imagen REST API (predict endpoint) to generate real binary images.
@@ -76,26 +92,39 @@ export class ImageGenerationCapability implements GenerationCapability {
         },
       };
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
+      let result: { predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }> } | undefined;
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        if (isAccessDeniedStatus(response.status) || isAccessDeniedMessage(errorText)) {
-          return { success: false, assets: [], metadata: { reason: 'access-denied', detail: errorText } };
+      for (let attempt = 0; attempt <= IMAGE_MAX_RETRIES; attempt++) {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          if (isAccessDeniedStatus(response.status) || isAccessDeniedMessage(errorText)) {
+            return { success: false, assets: [], metadata: { reason: 'access-denied', detail: errorText } };
+          }
+          if (attempt < IMAGE_MAX_RETRIES && (isRetryableStatus(response.status) || isRetryableMessage(errorText))) {
+            const delay = IMAGE_INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+            console.log(JSON.stringify({ level: 'warn', msg: 'Imagen 429 retry', attempt: attempt + 1, delayMs: delay }));
+            await sleepMs(delay);
+            continue;
+          }
+          throw new Error(`Imagen API failed (${response.status}): ${errorText}`);
         }
-        throw new Error(`Imagen API failed (${response.status}): ${errorText}`);
+
+        result = await response.json() as typeof result;
+        break;
       }
 
-      const result = await response.json() as {
-        predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
-      };
+      if (!result) {
+        throw new Error('Imagen API failed: max retries exceeded');
+      }
 
       const base64Image = result.predictions?.[0]?.bytesBase64Encoded;
 

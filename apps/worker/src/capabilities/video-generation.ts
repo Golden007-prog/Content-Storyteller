@@ -13,7 +13,7 @@ import { getGcpConfig } from '../config/gcp';
 
 const VIDEO_POLL_INTERVAL_BASE_MS = 15_000; // initial poll interval
 const VIDEO_POLL_INTERVAL_CAP_MS = 120_000; // max poll interval after backoff
-const VIDEO_TIMEOUT_MS = Number(process.env.VIDEO_GENERATION_TIMEOUT_MS) || 5 * 60 * 1000; // configurable, default 5 min
+const VIDEO_TIMEOUT_MS = Number(process.env.VIDEO_GENERATION_TIMEOUT_MS) || 10 * 60 * 1000; // configurable, default 10 min
 const CONSECUTIVE_TRANSIENT_WARN_THRESHOLD = 5;
 
 /**

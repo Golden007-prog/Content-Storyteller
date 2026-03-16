@@ -66,6 +66,9 @@ export function OutputDashboard({ copyPackage, storyboard, videoBrief, imageConc
     return 'pending';
   })();
 
+  // Check if image generation had warnings (failed)
+  const imageWarning = warnings?.find(w => w.stage === 'GenerateImages');
+
   // Determine if an output type is skipped
   const isSkipped = (type: string) => skippedOutputs?.includes(type) ?? false;
   // Determine if an output type should be shown (either no filtering or it's requested and not skipped)
@@ -99,7 +102,7 @@ export function OutputDashboard({ copyPackage, storyboard, videoBrief, imageConc
         <SectionWrapper visible><VoiceoverView voiceoverScript={copyPackage.voiceoverScript} onScreenText={copyPackage.onScreenText} /></SectionWrapper>
       )}
       {showVideo && (hasStoryboard ? <SectionWrapper visible><StoryboardView storyboard={storyboard} /></SectionWrapper> : hasCopy && <SkeletonSection />)}
-      {showImage && ((hasImageConcepts || hasImages) ? <SectionWrapper visible><VisualDirection imageConcepts={imageConcepts ?? []} imageUrls={imageUrls} /></SectionWrapper> : hasCopy && <SkeletonSection />)}
+      {showImage && ((hasImageConcepts || hasImages) ? <SectionWrapper visible><VisualDirection imageConcepts={imageConcepts ?? []} imageUrls={imageUrls} /></SectionWrapper> : hasCopy && (imageWarning ? <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-700"><span>⚠️</span><span>Image generation encountered an issue. Retrying on next run.</span></div> : <SkeletonSection />))}
       {showVideo && (hasVideoBrief ? <SectionWrapper visible><VideoBriefView videoBrief={videoBrief} videoUrl={videoUrl} videoStatus={videoStatus} /></SectionWrapper> : hasStoryboard && <SkeletonSection />)}
       {showGif && (hasGif ? <SectionWrapper visible><GifPreview gifAsset={gifAsset} /></SectionWrapper> : hasCopy && <SkeletonSection />)}
     </div>
