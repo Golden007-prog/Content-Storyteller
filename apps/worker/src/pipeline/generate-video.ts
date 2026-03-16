@@ -8,6 +8,7 @@ import {
   Storyboard,
   StoryboardScene,
   VideoBrief,
+  ImageConcept,
   Platform,
   Tone,
   getModel,
@@ -19,6 +20,7 @@ import { createLogger } from '../middleware/logger';
 import { randomUUID } from 'crypto';
 import { capabilityRegistry } from '../capabilities/capability-registry';
 import { getProjectId, buildStoragePath } from './storage-paths';
+import { getGcpConfig } from '../config/gcp';
 
 /**
  * Platform-specific scene pacing guidance for the GenerateVideo prompt.
@@ -240,6 +242,40 @@ function formatStoryboardText(storyboard: Storyboard): string {
 }
 
 /**
+ * Resolve the GCS URI of the first generated image from the pipeline context.
+ * GenerateImages stores image asset paths as relative storage paths (e.g.
+ * "projectId/jobId/images/image-uuid.png"). We need the full gs:// URI
+ * for the Veo image-to-video reference frame.
+ */
+function resolveFirstImageGcsUri(context: PipelineContext): string | undefined {
+  // Look for image asset paths stored by GenerateImages stage
+  // The stage pushes paths like "projectId/jobId/images/image-{uuid}.png" into assets
+  // and stores imageConcepts in workingData, but doesn't store individual image paths.
+  // We need to check workingData for any image storage paths.
+  const workingData = context.workingData;
+
+  // Check if there's a direct imageAssetPath (set by some flows)
+  if (typeof workingData.imageAssetPath === 'string' && workingData.imageAssetPath) {
+    const cfg = getGcpConfig();
+    const path = workingData.imageAssetPath;
+    // If it's already a gs:// URI, return as-is
+    if (path.startsWith('gs://')) return path;
+    return `gs://${cfg.assetsBucket}/${path}`;
+  }
+
+  // Check for imageAssetPaths array (populated by some pipeline configurations)
+  const paths = workingData.imageAssetPaths;
+  if (Array.isArray(paths) && paths.length > 0 && typeof paths[0] === 'string') {
+    const cfg = getGcpConfig();
+    const path = paths[0];
+    if (path.startsWith('gs://')) return path;
+    return `gs://${cfg.assetsBucket}/${path}`;
+  }
+
+  return undefined;
+}
+
+/**
  * GenerateVideo stage: generate a structured Storyboard and VideoBrief from
  * the Creative Brief using the Google GenAI SDK, persist both as JSON assets,
  * and optionally attempt actual video generation if the capability is available.
@@ -361,7 +397,14 @@ export class GenerateVideo implements PipelineStage {
 
           const genResult = await videoCapability.generate({
             jobId: context.jobId,
-            data: { brief, storyboard, videoBrief, timeoutMs: videoTimeoutMs },
+            data: {
+              brief,
+              storyboard,
+              videoBrief,
+              timeoutMs: videoTimeoutMs,
+              imageConcepts: context.workingData.imageConcepts as ImageConcept[] | undefined,
+              imageGcsUri: resolveFirstImageGcsUri(context),
+            },
           });
 
           if (genResult.success && genResult.assets.length > 0) {

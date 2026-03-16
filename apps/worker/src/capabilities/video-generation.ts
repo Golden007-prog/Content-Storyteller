@@ -5,6 +5,7 @@ import {
   CreativeBrief,
   Storyboard,
   VideoBrief,
+  ImageConcept,
   getModel,
   getLocation,
 } from '@content-storyteller/shared';
@@ -64,12 +65,14 @@ export class VideoGenerationCapability implements GenerationCapability {
     const brief = data.brief as CreativeBrief | undefined;
     const storyboard = data.storyboard as Storyboard | undefined;
     const videoBrief = data.videoBrief as VideoBrief | undefined;
+    const imageConcepts = data.imageConcepts as ImageConcept[] | undefined;
+    const imageGcsUri = data.imageGcsUri as string | undefined;
     // Allow caller to pass a custom timeout (e.g., remaining pipeline time)
     const timeoutMs = typeof data.timeoutMs === 'number' && data.timeoutMs > 0
       ? data.timeoutMs
       : VIDEO_DEFAULT_TIMEOUT_MS;
 
-    const prompt = buildVeoPrompt(brief, storyboard, videoBrief);
+    const prompt = buildVeoPrompt(brief, storyboard, videoBrief, imageConcepts);
 
     try {
       const { GoogleAuth } = await import('google-auth-library');
@@ -85,8 +88,14 @@ export class VideoGenerationCapability implements GenerationCapability {
       // Submit video generation job to Vertex AI Veo API
       const endpoint = `https://${loc}-aiplatform.googleapis.com/v1/projects/${cfg.projectId}/locations/${loc}/publishers/google/models/${getModel('videoFinal')}:predictLongRunning`;
 
+      // Build the instance object — optionally include a reference image for visual consistency
+      const instance: Record<string, unknown> = { prompt };
+      if (imageGcsUri) {
+        instance.image = { gcsUri: imageGcsUri, mimeType: 'image/png' };
+      }
+
       const requestBody = {
-        instances: [{ prompt }],
+        instances: [instance],
         parameters: {
           aspectRatio: '16:9',
           sampleCount: 1,
@@ -358,29 +367,52 @@ function buildVeoPrompt(
   brief?: CreativeBrief,
   storyboard?: Storyboard,
   videoBrief?: VideoBrief,
+  imageConcepts?: ImageConcept[],
 ): string {
   const parts: string[] = [];
 
+  // Lead with the VideoBrief's rich visual direction when available
+  if (videoBrief) {
+    parts.push(`Camera direction: ${videoBrief.cameraDirection}`);
+    parts.push(`Motion style: ${videoBrief.motionStyle}`);
+    parts.push(`Energy: ${videoBrief.energyDirection}`);
+    if (videoBrief.textOverlayStyle) {
+      parts.push(`Text overlay style: ${videoBrief.textOverlayStyle}`);
+    }
+  }
+
+  // Incorporate per-scene visual descriptions from the storyboard
+  if (storyboard && storyboard.scenes.length > 0) {
+    const sceneDesc = storyboard.scenes
+      .map(s =>
+        `Scene ${s.sceneNumber} (${s.duration}): ${s.description}. ` +
+        `Camera: ${s.cameraDirection}. Motion: ${s.motionStyle}` +
+        (s.textOverlay ? `. Text: "${s.textOverlay}"` : ''),
+      )
+      .join('. ');
+    parts.push(sceneDesc);
+  }
+
+  // Add visual style cues from image concepts for tighter consistency
+  if (imageConcepts && imageConcepts.length > 0) {
+    const styleHints = imageConcepts
+      .slice(0, 3)
+      .map(c => `${c.conceptName}: ${c.visualDirection} (${c.style})`)
+      .join('; ');
+    parts.push(`Visual style reference: ${styleHints}`);
+  }
+
+  // Add brief context for audience and tone grounding
   if (brief) {
-    parts.push(`Create a short promotional video for: ${brief.inputSummary || brief.keyMessages.join(', ')}`);
     parts.push(`Target audience: ${brief.targetAudience}`);
     parts.push(`Tone: ${brief.tone}`);
     parts.push(`Visual direction: ${brief.visualDirection}`);
     if (brief.campaignAngle) parts.push(`Campaign angle: ${brief.campaignAngle}`);
-  } else {
+  }
+
+  // Fallback if nothing was provided
+  if (parts.length === 0) {
     parts.push('Create a short promotional marketing video');
-  }
-
-  if (storyboard && storyboard.scenes.length > 0) {
-    const sceneDesc = storyboard.scenes
-      .map(s => `Scene ${s.sceneNumber}: ${s.description} (${s.duration}, ${s.motionStyle})`)
-      .join('. ');
-    parts.push(`Storyboard: ${sceneDesc}`);
-  }
-
-  if (videoBrief) {
-    parts.push(`Motion style: ${videoBrief.motionStyle}`);
-    parts.push(`Energy: ${videoBrief.energyDirection}`);
   }
 
   return parts.join('. ');

@@ -147,6 +147,7 @@ export class GenerateImages implements PipelineStage {
       });
 
       const assets: string[] = [conceptsStoragePath];
+      const imageAssetPaths: string[] = [];
 
       // 4. Check if image generation capability is available
       const imageCapability = capabilityRegistry.get('image_generation');
@@ -196,6 +197,7 @@ export class GenerateImages implements PipelineStage {
                   status: 'completed',
                 });
                 assets.push(imageStoragePath);
+                imageAssetPaths.push(imageStoragePath);
               }
             }
           } catch (genErr) {
@@ -220,6 +222,7 @@ export class GenerateImages implements PipelineStage {
       // Store in working data for downstream stages
       context.workingData.imageConcepts = imageConcepts;
       context.workingData.imageConceptsAssetPath = conceptsStoragePath;
+      context.workingData.imageAssetPaths = imageAssetPaths;
 
       log.info('GenerateImages stage completed', { conceptCount: imageConcepts.length, assetCount: assets.length });
       return { success: true, assets };
