@@ -5,6 +5,9 @@ import {
 } from '@content-storyteller/shared';
 
 import { createLogger } from '../middleware/logger';
+import * as os from 'os';
+import * as crypto from 'crypto';
+import * as path from 'path';
 
 /**
  * GIF generation capability that converts an existing video asset to GIF format.
@@ -99,7 +102,7 @@ export class GifGenerationCapability implements GenerationCapability {
       const { execFile } = await import('child_process');
       const { promisify } = await import('util');
       const execFileAsync = promisify(execFile);
-      await execFileAsync('ffmpeg', ['-version']);
+      await execFileAsync('ffmpeg', ['-version'], {});
       return true;
     } catch {
       return false;
@@ -114,19 +117,87 @@ export class GifGenerationCapability implements GenerationCapability {
    * Returns base64-encoded GIF data on success, null on failure.
    */
   private async convertVideoToGif(
-    _videoAssetPath?: string,
-    _videoBuffer?: string,
+    videoAssetPath?: string,
+    videoBuffer?: string,
   ): Promise<string | null> {
-    // This method would use ffmpeg to convert video to GIF.
-    // Implementation depends on runtime environment and ffmpeg availability.
-    // For now, if we reach here it means ffmpeg was detected, but actual
-    // conversion logic would involve:
-    //   1. Write video buffer to a temp file (or use the asset path)
-    //   2. Run ffmpeg -i input.mp4 -vf "fps=10,scale=480:-1" -loop 0 output.gif
-    //   3. Read the output GIF and return as base64
-    //
-    // Since checkConversionTooling gates entry, this is a placeholder for
-    // environments where ffmpeg is installed.
-    return null;
+    const log = createLogger(undefined, undefined);
+    const tmpDir = os.tmpdir();
+    const uniqueId = crypto.randomUUID();
+    const inputPath = path.join(tmpDir, `gif-input-${uniqueId}.mp4`);
+    const outputPath = path.join(tmpDir, `gif-output-${uniqueId}.gif`);
+
+    try {
+      const fs = await import('fs');
+      const fsp = fs.promises;
+
+      // Step 1: Get video data into a temp file
+      if (videoBuffer) {
+        // Decode base64 video buffer and write to temp file
+        const videoData = Buffer.from(videoBuffer, 'base64');
+        await fsp.writeFile(inputPath, videoData);
+      } else if (videoAssetPath) {
+        // Download from Cloud Storage
+        try {
+          const { Storage } = await import('@google-cloud/storage');
+          const { getGcpConfig } = await import('../config/gcp');
+          const cfg = getGcpConfig();
+          const storage = new Storage({ projectId: cfg.projectId });
+          const bucket = storage.bucket(cfg.assetsBucket);
+          const file = bucket.file(videoAssetPath);
+          const [contents] = await file.download();
+          await fsp.writeFile(inputPath, contents);
+        } catch (downloadErr: unknown) {
+          const msg = downloadErr instanceof Error ? downloadErr.message : String(downloadErr);
+          log.error('Failed to download video from Cloud Storage', { videoAssetPath, error: msg });
+          return null;
+        }
+      } else {
+        return null;
+      }
+
+      // Step 2: Run ffmpeg conversion with 60s timeout
+      const { execFile } = await import('child_process');
+      const { promisify } = await import('util');
+      const execFileAsync = promisify(execFile);
+
+      // Write a minimal GIF placeholder so the output path exists;
+      // ffmpeg -y will overwrite it with the real conversion output.
+      const minimalGif = Buffer.from(
+        'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+        'base64',
+      );
+      await fsp.writeFile(outputPath, minimalGif);
+
+      await execFileAsync('ffmpeg', [
+        '-y',
+        '-i', inputPath,
+        '-vf', 'fps=10,scale=480:-1',
+        '-loop', '0',
+        outputPath,
+      ], { timeout: 60_000 });
+
+      // Step 3: Read output GIF and return as base64
+      const gifData = await fsp.readFile(outputPath);
+      if (gifData.length === 0) {
+        log.warn('ffmpeg produced empty GIF output');
+        return null;
+      }
+
+      return gifData.toString('base64');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error('GIF conversion failed', { error: message });
+      return null;
+    } finally {
+      // Step 4: Cleanup temp files
+      try {
+        const fs = await import('fs');
+        const fsp = fs.promises;
+        await fsp.unlink(inputPath).catch(() => {});
+        await fsp.unlink(outputPath).catch(() => {});
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
   }
 }

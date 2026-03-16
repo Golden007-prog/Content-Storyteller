@@ -328,7 +328,7 @@ describe('MVP Worker Pipeline Property Tests', () => {
             const result = await stage.execute(context);
 
             expect(result.success).toBe(true);
-            expect(result.assets.length).toBe(1);
+            expect(result.assets.length).toBeGreaterThanOrEqual(1);
             expect(result.assets[0]).toContain(`${jobId}/copy/`);
 
             // Verify persisted JSON is a valid CopyPackage
@@ -399,7 +399,7 @@ describe('MVP Worker Pipeline Property Tests', () => {
             expect(result.success).toBe(true);
             // At least the concepts JSON asset
             expect(result.assets.length).toBeGreaterThanOrEqual(1);
-            const conceptsPath = result.assets.find((p) => p.includes('image-concepts'));
+            const conceptsPath = result.assets.find((p) => p.includes('image-concept'));
             expect(conceptsPath).toBeDefined();
 
             const assetData = mocks.writtenAssets.get(conceptsPath!);

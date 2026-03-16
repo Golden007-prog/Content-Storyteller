@@ -235,7 +235,7 @@ describe('Test A (PBT): Image concept JSON must NOT be recorded as AssetType.Ima
       // Get all recorded assets from the job store
       const finalJob = mocks.jobStore.get(jobId)!;
       const conceptAssets = finalJob.assets.filter(
-        (a: AssetReference) => a.storagePath.includes('image-concepts'),
+        (a: AssetReference) => a.storagePath.includes('image-concept'),
       );
 
       expect(conceptAssets.length).toBeGreaterThan(0);

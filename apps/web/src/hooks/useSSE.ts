@@ -2,6 +2,33 @@ import { useEffect, useRef, useCallback } from 'react';
 import type { StreamEventShape } from '@content-storyteller/shared';
 import { createSSEConnection } from '../api/client';
 
+/**
+ * Extract media URLs from SSE asset references by filtering on assetType.
+ * Returns imageUrls (from 'image' assets), videoUrl (from 'video' assets),
+ * and gifUrl (from 'gif' assets) using their signedUrl fields.
+ */
+export function extractMediaUrlsFromAssets(
+  assets: Array<{ assetType: string; signedUrl?: string; status?: string }>,
+): { imageUrls: string[]; videoUrl: string | undefined; gifUrl: string | undefined } {
+  const imageUrls = assets
+    .filter((a) => a.assetType === 'image' && !!a.signedUrl)
+    .map((a) => a.signedUrl!);
+
+  const videoAsset = assets.find(
+    (a) => a.assetType === 'video' && !!a.signedUrl,
+  );
+
+  const gifAsset = assets.find(
+    (a) => a.assetType === 'gif' && !!a.signedUrl,
+  );
+
+  return {
+    imageUrls,
+    videoUrl: videoAsset?.signedUrl,
+    gifUrl: gifAsset?.signedUrl,
+  };
+}
+
 export interface SSECallbacks {
   onStateChange?: (data: StreamEventShape['data']) => void;
   onPartialResult?: (data: StreamEventShape['data']) => void;

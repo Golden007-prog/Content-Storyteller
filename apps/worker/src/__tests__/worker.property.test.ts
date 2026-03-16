@@ -748,7 +748,7 @@ describe('Worker Service Property Tests', () => {
             if (capabilityName === 'image_generation') {
               // Only the concepts JSON, no generated images
               for (const a of capAssets) {
-                expect(a.storagePath).toContain('image-concepts');
+                expect(a.storagePath).toContain('image-concept');
               }
             } else {
               // Only the video-brief JSON, no generated video files

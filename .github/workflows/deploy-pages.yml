@@ -37,8 +37,10 @@ jobs:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
           VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH }}
 
-      - name: Add 404.html for SPA routing
-        run: cp apps/web/dist/index.html apps/web/dist/404.html
+      - name: Prepare for GitHub Pages
+        run: |
+          cp apps/web/dist/index.html apps/web/dist/404.html
+          touch apps/web/dist/.nojekyll
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4

@@ -16,6 +16,7 @@ import { writeAsset } from '../services/storage';
 import { createLogger } from '../middleware/logger';
 import { randomUUID } from 'crypto';
 import { capabilityRegistry } from '../capabilities/capability-registry';
+import { getProjectId, buildStoragePath } from './storage-paths';
 
 /**
  * Build the image concept generation prompt with platform and tone awareness.
@@ -129,8 +130,9 @@ export class GenerateImages implements PipelineStage {
       }
 
       // 2. Always persist ImageConcept array as JSON asset
+      const projectId = getProjectId(context.workingData);
       const conceptsAssetId = randomUUID();
-      const conceptsStoragePath = `${context.jobId}/image-concepts/${conceptsAssetId}.json`;
+      const conceptsStoragePath = buildStoragePath(projectId, context.jobId, 'metadata', `image-concept-${conceptsAssetId}.json`);
       const conceptsJson = JSON.stringify(imageConcepts, null, 2);
       await writeAsset(conceptsStoragePath, Buffer.from(conceptsJson, 'utf-8'), 'application/json');
 
@@ -179,7 +181,7 @@ export class GenerateImages implements PipelineStage {
                 }
 
                 const imageAssetId = randomUUID();
-                const imageStoragePath = `${context.jobId}/images/${imageAssetId}.png`;
+                const imageStoragePath = buildStoragePath(projectId, context.jobId, 'images', `image-${imageAssetId}.png`);
                 await writeAsset(
                   imageStoragePath,
                   Buffer.from(assetData, 'base64'),

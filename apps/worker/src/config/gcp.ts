@@ -21,6 +21,8 @@ export interface GcpConfig {
   geminiApiKey: string;
   isCloud: boolean;
   authMode: 'adc-service-account' | 'adc-user' | 'api-key-fallback';
+  /** AlloyDB connection string — optional, empty if AlloyDB not configured */
+  alloydbConnectionString: string;
 }
 
 function resolveProjectId(): string {
@@ -64,6 +66,7 @@ export function getGcpConfig(): GcpConfig {
   const geminiApiKey = process.env.GEMINI_API_KEY || '';
   const isCloud = resolveIsCloud();
   const authMode = resolveAuthMode(geminiApiKey, isCloud);
+  const alloydbConnectionString = process.env.ALLOYDB_CONNECTION_STRING || '';
 
   _config = {
     projectId,
@@ -76,6 +79,7 @@ export function getGcpConfig(): GcpConfig {
     geminiApiKey,
     isCloud,
     authMode,
+    alloydbConnectionString,
   };
 
   return _config;
@@ -93,6 +97,7 @@ export function logGcpConfig(logFn: (msg: string, meta?: Record<string, unknown>
     pubsubSubscription: cfg.pubsubSubscription || '(not set)',
     authMode: cfg.authMode,
     isCloud: cfg.isCloud,
+    alloydbConnectionString: cfg.alloydbConnectionString ? '(set)' : '(not set)',
   });
 }
 

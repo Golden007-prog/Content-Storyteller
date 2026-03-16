@@ -11,6 +11,8 @@ import { getProviders } from './registry';
 import { normalizeSignals, NormalizedSignal } from './normalize';
 import type { RawTrendSignal } from './types';
 import { generateContent } from '../genai';
+import { isAlloyDbConfigured } from '../firestore';
+import { getPool } from '../alloydb';
 
 /**
  * Builds the Gemini prompt for trend consolidation, clustering, ranking,
@@ -180,6 +182,51 @@ function compositeScore(item: TrendItem, query: TrendQuery): number {
 }
 
 /**
+ * Best-effort write of trend analysis results to AlloyDB trend_reports table.
+ * Fire-and-forget — failures are logged but never affect the caller.
+ */
+function persistTrendToAlloyDb(
+  query: TrendQuery,
+  result: TrendAnalysisResult,
+): void {
+  if (!isAlloyDbConfigured()) return;
+
+  const regionLabel =
+    query.region.scope === 'global'
+      ? 'global'
+      : query.region.scope === 'state_province'
+        ? `${query.region.stateProvince}, ${query.region.country}`
+        : query.region.country ?? 'unknown';
+
+  try {
+    const pool = getPool();
+    pool
+      .query(
+        `INSERT INTO trend_reports (query_text, platform, domain, region, results)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          query.domain,
+          query.platform,
+          query.domain,
+          regionLabel,
+          JSON.stringify(result),
+        ],
+      )
+      .catch((err: Error) => {
+        console.error(
+          '[TrendAnalyzer] AlloyDB trend_reports write failed (best-effort):',
+          err.message,
+        );
+      });
+  } catch (err) {
+    console.error(
+      '[TrendAnalyzer] AlloyDB trend_reports write failed (best-effort):',
+      (err as Error).message,
+    );
+  }
+}
+
+/**
  * Main orchestrator: collects signals from providers, normalizes them,
  * passes to Gemini for consolidation and ranking, returns structured result.
  */
@@ -216,8 +263,8 @@ export async function analyzeTrends(
   // 6. Parse Gemini response
   const { summary, trends } = parseGeminiResponse(geminiRaw, query);
 
-  // 7. Return structured result
-  return {
+  // 7. Build structured result
+  const result: TrendAnalysisResult = {
     queryId: '', // set after Firestore persistence by the route handler
     platform: query.platform,
     domain: query.domain,
@@ -228,4 +275,9 @@ export async function analyzeTrends(
     summary,
     trends,
   };
+
+  // 8. Best-effort persist to AlloyDB (fire-and-forget, keeps Firestore as UI cache)
+  persistTrendToAlloyDb(query, result);
+
+  return result;
 }

@@ -10,6 +10,7 @@ import { getJob, updateJobState } from '../services/firestore';
 import { writeAsset } from '../services/storage';
 import { createLogger } from '../middleware/logger';
 import { randomUUID } from 'crypto';
+import { getProjectId, buildStoragePath } from './storage-paths';
 
 /**
  * ComposePackage stage: assemble the final Asset Bundle from all
@@ -44,8 +45,9 @@ export class ComposePackage implements PipelineStage {
       };
 
       // Write the bundle manifest to the assets bucket
+      const projectId = getProjectId(context.workingData);
       const bundleId = randomUUID();
-      const bundlePath = `${context.jobId}/bundle/${bundleId}.json`;
+      const bundlePath = buildStoragePath(projectId, context.jobId, 'package', `bundle-${bundleId}.json`);
       await writeAsset(
         bundlePath,
         Buffer.from(JSON.stringify(bundle, null, 2), 'utf-8'),

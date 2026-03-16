@@ -78,6 +78,18 @@ vi.mock('../middleware/logger', () => ({
   requestLogger: vi.fn(),
 }));
 
+vi.mock('../services/firestore', () => ({
+  isAlloyDbConfigured: () => false,
+}));
+
+vi.mock('../services/alloydb', () => ({
+  getPool: () => ({}),
+}));
+
+vi.mock('../services/trends/analyzer', () => ({
+  analyzeTrends: vi.fn().mockResolvedValue({ trends: [], platform: 'all', domain: 'tech', summary: '' }),
+}));
+
 vi.mock('../config/gcp', () => ({
   getGcpConfig: vi.fn().mockReturnValue({
     projectId: 'test-project',
@@ -190,9 +202,13 @@ describe('Live session model routing', () => {
     });
   });
 
-  // Req 5.4: ModelUnavailableError propagates from processLiveInput
+  // Req 5.4: ModelUnavailableError handling
+  // Note: Since task 10.1, generateAgentResponse catches getModel errors
+  // and falls back to a default model. ModelUnavailableError from getModel('live')
+  // is caught internally, so processLiveInput succeeds with the fallback model.
+  // The error only propagates if generateContent itself throws ModelUnavailableError.
   describe('ModelUnavailableError handling', () => {
-    it('re-throws ModelUnavailableError when getModel("live") throws', async () => {
+    it('succeeds with fallback model when getModel("live") throws ModelUnavailableError', async () => {
       // Make getModel('live') throw ModelUnavailableError
       mocks.getModelSpy.mockImplementation((slot: string) => {
         if (slot === 'live') throw new ModelUnavailableError('live');
@@ -202,27 +218,22 @@ describe('Live session model routing', () => {
       // Create a session
       const session = await createLiveSession();
 
-      // processLiveInput should re-throw ModelUnavailableError
-      await expect(
-        processLiveInput(session.sessionId, 'Hello'),
-      ).rejects.toThrow(ModelUnavailableError);
+      // processLiveInput should succeed because generateAgentResponse
+      // catches the error and uses a fallback model
+      const result = await processLiveInput(session.sessionId, 'Hello');
+      expect(result.agentText).toBeTruthy();
+      expect(result.transcript.length).toBeGreaterThan(0);
     });
 
-    it('ModelUnavailableError has correct slot property', async () => {
-      mocks.getModelSpy.mockImplementation((slot: string) => {
-        if (slot === 'live') throw new ModelUnavailableError('live');
-        return `test-${slot}-model`;
-      });
+    it('re-throws ModelUnavailableError when generateContent throws it', async () => {
+      // Make generateContent throw ModelUnavailableError
+      mocks.generateContentSpy.mockRejectedValue(new ModelUnavailableError('live'));
 
       const session = await createLiveSession();
 
-      try {
-        await processLiveInput(session.sessionId, 'Hello');
-        expect.fail('Should have thrown');
-      } catch (err) {
-        expect(err).toBeInstanceOf(ModelUnavailableError);
-        expect((err as ModelUnavailableError).slot).toBe('live');
-      }
+      await expect(
+        processLiveInput(session.sessionId, 'Hello'),
+      ).rejects.toThrow(ModelUnavailableError);
     });
   });
 });

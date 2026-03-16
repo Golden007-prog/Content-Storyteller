@@ -62,6 +62,48 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendText(); }
   };
 
+  const handleExploreTrends = useCallback(async () => {
+    if (!sessionId || isProcessing) return;
+    setInputText("What's trending right now? Show me the top trends for content creation.");
+    // Auto-send after a brief tick so the input is visible
+    setTimeout(() => {
+      handleSendText();
+    }, 0);
+  }, [sessionId, isProcessing, handleSendText]);
+
+  /**
+   * Detect trend references in agent text (hashtags, trend keywords).
+   * Returns JSX with highlighted trend indicators.
+   */
+  const renderMessageWithTrendIndicators = (text: string, role: string) => {
+    if (role === 'user') return text;
+
+    // Highlight hashtags
+    const parts = text.split(/(#\w+)/g);
+    const hasTrendContent = parts.some((p) => p.startsWith('#'));
+
+    return (
+      <span>
+        {parts.map((part, i) =>
+          part.startsWith('#') ? (
+            <span key={i} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-brand-100 text-brand-700 font-medium text-xs mx-0.5">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="9" x2="20" y2="9" /><line x1="4" y1="15" x2="20" y2="15" /><line x1="10" y1="3" x2="8" y2="21" /><line x1="16" y1="3" x2="14" y2="21" /></svg>
+              {part}
+            </span>
+          ) : (
+            <React.Fragment key={i}>{part}</React.Fragment>
+          ),
+        )}
+        {hasTrendContent && (
+          <span className="inline-flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 text-[10px] font-semibold uppercase tracking-wide">
+            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></svg>
+            Trend
+          </span>
+        )}
+      </span>
+    );
+  };
+
   return (
     <div>
       {/* Hero */}
@@ -127,7 +169,7 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
                         ? 'bg-gradient-brand text-white rounded-br-md'
                         : 'bg-gray-50 border border-gray-100 text-gray-800 rounded-bl-md'
                     }`}>
-                      {entry.text}
+                      {renderMessageWithTrendIndicators(entry.text, entry.role)}
                     </div>
                   </div>
                 ))}
@@ -166,6 +208,14 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
               <div className="card p-5">
                 <h3 className="text-sm font-semibold text-gray-900 mb-3">Quick Actions</h3>
                 <div className="space-y-2">
+                  <button
+                    onClick={handleExploreTrends}
+                    disabled={isProcessing || sessionEnded}
+                    className="w-full text-left text-sm font-medium rounded-xl px-4 py-3 transition-all bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-md shadow-green-500/20 hover:shadow-lg disabled:opacity-50 flex items-center gap-2"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></svg>
+                    Explore Trends
+                  </button>
                   {['Generate Social Copy', 'Create Storyboard', 'Design Visuals', 'Export Package'].map((action, i) => (
                     <button key={action} className={`w-full text-left text-sm font-medium rounded-xl px-4 py-3 transition-all ${i === 0 ? 'bg-gradient-brand text-white shadow-md shadow-brand-500/20 hover:shadow-lg' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'}`}>
                       {action}

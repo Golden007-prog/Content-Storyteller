@@ -15,6 +15,7 @@ import { generateContent } from '../services/genai';
 import { writeAsset } from '../services/storage';
 import { createLogger } from '../middleware/logger';
 import { randomUUID } from 'crypto';
+import { getProjectId, buildStoragePath } from './storage-paths';
 
 /**
  * Platform-specific copy instructions for the GenerateCopy prompt.
@@ -137,6 +138,44 @@ function validateCopyPackage(parsed: Record<string, unknown>, brief: CreativeBri
 }
 
 /**
+ * Build human-readable .txt file contents from a CopyPackage.
+ * Returns an array of { filename, content } pairs for each text file.
+ */
+function buildCopyTextFiles(pkg: CopyPackage): { filename: string; content: string }[] {
+  // Human-readable copy package
+  const copyPackageTxt = [
+    '=== COPY PACKAGE ===',
+    '',
+    `HEADLINE / HOOK:`,
+    pkg.hook,
+    '',
+    `BODY COPY / CAPTION:`,
+    pkg.caption,
+    '',
+    `CALL TO ACTION:`,
+    pkg.cta,
+    '',
+    `HASHTAGS:`,
+    pkg.hashtags.map((h) => `#${h}`).join(' '),
+    '',
+    `ON-SCREEN TEXT:`,
+    ...pkg.onScreenText.map((t, i) => `  ${i + 1}. ${t}`),
+    '',
+    `VOICEOVER SCRIPT:`,
+    pkg.voiceoverScript,
+  ].join('\n');
+
+  return [
+    { filename: 'copy-package.txt', content: copyPackageTxt },
+    { filename: 'caption.txt', content: pkg.caption },
+    { filename: 'hashtags.txt', content: pkg.hashtags.map((h) => `#${h}`).join(' ') },
+    { filename: 'call-to-action.txt', content: pkg.cta },
+    { filename: 'voiceover-script.txt', content: pkg.voiceoverScript },
+    { filename: 'on-screen-text.txt', content: pkg.onScreenText.join('\n') },
+  ];
+}
+
+/**
  * GenerateCopy stage: generate a structured CopyPackage from the Creative Brief
  * using the Google GenAI SDK, then persist the copy asset.
  */
@@ -183,8 +222,9 @@ export class GenerateCopy implements PipelineStage {
       }
 
       // Persist CopyPackage as JSON asset
+      const projectId = getProjectId(context.workingData);
       const assetId = randomUUID();
-      const storagePath = `${context.jobId}/copy/${assetId}.json`;
+      const storagePath = buildStoragePath(projectId, context.jobId, 'copy', `copy-package-${assetId}.json`);
       const jsonData = JSON.stringify(copyPackage, null, 2);
       await writeAsset(storagePath, Buffer.from(jsonData, 'utf-8'), 'application/json');
 
@@ -198,12 +238,24 @@ export class GenerateCopy implements PipelineStage {
         status: 'completed',
       });
 
+      const allAssets = [storagePath];
+
+      // Persist human-readable .txt files alongside JSON
+      const txtFiles = buildCopyTextFiles(copyPackage);
+      for (const { filename, content } of txtFiles) {
+        const txtPath = buildStoragePath(projectId, context.jobId, filename.includes('voiceover') || filename.includes('on-screen') ? 'voiceover' : 'copy', filename);
+        await writeAsset(txtPath, Buffer.from(content, 'utf-8'), 'text/plain');
+        allAssets.push(txtPath);
+      }
+
+      log.info('Persisted text files alongside JSON', { count: txtFiles.length });
+
       // Store in working data for downstream stages
       context.workingData.copyAssetPath = storagePath;
       context.workingData.copyPackage = copyPackage;
 
       log.info('GenerateCopy stage completed', { assetId, platform, tone });
-      return { success: true, assets: [storagePath] };
+      return { success: true, assets: allAssets };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error('GenerateCopy stage failed', { error: message });

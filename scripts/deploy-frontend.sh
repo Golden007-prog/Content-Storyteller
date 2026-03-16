@@ -6,7 +6,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Usage:
 #   VITE_API_URL=https://api-service-xxx-uc.a.run.app \
-#   VITE_BASE_PATH=/content-storyteller/ \
+#   VITE_BASE_PATH=/Content-Storyteller/ \
 #   bash scripts/deploy-frontend.sh
 # ---------------------------------------------------------------------------
 
@@ -37,8 +37,9 @@ npm run build --workspace=packages/shared
 echo -e "${YELLOW}Building frontend...${NC}"
 VITE_API_URL="$VITE_API_URL" VITE_BASE_PATH="$VITE_BASE_PATH" npm run build --workspace=apps/web
 
-# --- Add 404.html for SPA routing on GitHub Pages ---
+# --- Add 404.html and .nojekyll for SPA routing on GitHub Pages ---
 cp apps/web/dist/index.html apps/web/dist/404.html
+touch apps/web/dist/.nojekyll
 
 echo -e "${GREEN}=== Frontend build complete ===${NC}"
 echo -e "Output: apps/web/dist/"

@@ -18,6 +18,7 @@ import { writeAsset } from '../services/storage';
 import { createLogger } from '../middleware/logger';
 import { randomUUID } from 'crypto';
 import { capabilityRegistry } from '../capabilities/capability-registry';
+import { getProjectId, buildStoragePath } from './storage-paths';
 
 /**
  * Platform-specific scene pacing guidance for the GenerateVideo prompt.
@@ -213,6 +214,32 @@ function validateVideoBrief(parsed: Record<string, unknown>, platform: Platform)
 }
 
 /**
+ * Format a Storyboard as human-readable text for .txt export.
+ */
+function formatStoryboardText(storyboard: Storyboard): string {
+  const lines: string[] = [
+    '=== STORYBOARD ===',
+    '',
+    `Total Duration: ${storyboard.totalDuration}`,
+    `Pacing: ${storyboard.pacing}`,
+    '',
+  ];
+
+  for (const scene of storyboard.scenes) {
+    lines.push(`--- Scene ${scene.sceneNumber} (${scene.duration}) ---`);
+    lines.push(`Description: ${scene.description}`);
+    lines.push(`Camera: ${scene.cameraDirection}`);
+    lines.push(`Motion: ${scene.motionStyle}`);
+    if (scene.textOverlay) {
+      lines.push(`Text Overlay: ${scene.textOverlay}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * GenerateVideo stage: generate a structured Storyboard and VideoBrief from
  * the Creative Brief using the Google GenAI SDK, persist both as JSON assets,
  * and optionally attempt actual video generation if the capability is available.
@@ -269,10 +296,11 @@ export class GenerateVideo implements PipelineStage {
       }
 
       const assets: string[] = [];
+      const projectId = getProjectId(context.workingData);
 
       // Persist Storyboard as JSON asset
       const storyboardAssetId = randomUUID();
-      const storyboardPath = `${context.jobId}/storyboard/${storyboardAssetId}.json`;
+      const storyboardPath = buildStoragePath(projectId, context.jobId, 'storyboard', `storyboard-${storyboardAssetId}.json`);
       const storyboardJson = JSON.stringify(storyboard, null, 2);
       await writeAsset(storyboardPath, Buffer.from(storyboardJson, 'utf-8'), 'application/json');
 
@@ -286,9 +314,20 @@ export class GenerateVideo implements PipelineStage {
       });
       assets.push(storyboardPath);
 
+      // Persist stable storyboard.json alongside the UUID-named JSON for easy discovery
+      const stableStoryboardJsonPath = buildStoragePath(projectId, context.jobId, 'storyboard', 'storyboard.json');
+      await writeAsset(stableStoryboardJsonPath, Buffer.from(storyboardJson, 'utf-8'), 'application/json');
+      assets.push(stableStoryboardJsonPath);
+
+      // Persist human-readable storyboard .txt alongside JSON
+      const storyboardTxt = formatStoryboardText(storyboard);
+      const storyboardTxtPath = buildStoragePath(projectId, context.jobId, 'storyboard', 'storyboard.txt');
+      await writeAsset(storyboardTxtPath, Buffer.from(storyboardTxt, 'utf-8'), 'text/plain');
+      assets.push(storyboardTxtPath);
+
       // Persist VideoBrief as JSON asset
       const videoBriefAssetId = randomUUID();
-      const videoBriefPath = `${context.jobId}/video-brief/${videoBriefAssetId}.json`;
+      const videoBriefPath = buildStoragePath(projectId, context.jobId, 'metadata', `video-brief-${videoBriefAssetId}.json`);
       const videoBriefJson = JSON.stringify(videoBrief, null, 2);
       await writeAsset(videoBriefPath, Buffer.from(videoBriefJson, 'utf-8'), 'application/json');
 
@@ -317,7 +356,7 @@ export class GenerateVideo implements PipelineStage {
           if (genResult.success && genResult.assets.length > 0) {
             for (const assetData of genResult.assets) {
               const videoAssetId = randomUUID();
-              const videoStoragePath = `${context.jobId}/video/${videoAssetId}.mp4`;
+              const videoStoragePath = buildStoragePath(projectId, context.jobId, 'video', `${videoAssetId}.mp4`);
               // Asset data from Veo API is base64-encoded mp4 binary
               const videoBuffer = Buffer.from(assetData, 'base64');
               await writeAsset(videoStoragePath, videoBuffer, 'video/mp4');
@@ -330,6 +369,11 @@ export class GenerateVideo implements PipelineStage {
                 status: 'completed',
               });
               assets.push(videoStoragePath);
+
+              // Set videoAssetPath for downstream stages (e.g. GenerateGif)
+              if (!context.workingData.videoAssetPath) {
+                context.workingData.videoAssetPath = videoStoragePath;
+              }
             }
             log.info('Video generation completed successfully', {
               videoAssetCount: genResult.assets.length,

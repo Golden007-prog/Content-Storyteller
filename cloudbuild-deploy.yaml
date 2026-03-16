@@ -1,3 +1,15 @@
+# ---------------------------------------------------------------------------
+# cloudbuild-deploy.yaml — Deploy-only pipeline (skip tests, just build & ship)
+# ---------------------------------------------------------------------------
+#
+# Usage:
+#   gcloud builds submit --config cloudbuild-deploy.yaml \
+#     --project=deep-hook-468814-t7
+
+substitutions:
+  _REGION: us-central1
+  _AR_REPO: content-storyteller
+
 steps:
   # 1. Install dependencies
   - name: 'node:20-alpine'
@@ -10,7 +22,7 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/api:latest'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:latest'
       - '-f'
       - 'apps/api/Dockerfile'
       - '.'
@@ -22,7 +34,7 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/worker:latest'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:latest'
       - '-f'
       - 'apps/worker/Dockerfile'
       - '.'
@@ -31,13 +43,13 @@ steps:
 
   # 4. Push API image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/api:latest']
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:latest']
     id: push-api
     waitFor: ['build-api']
 
   # 5. Push Worker image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/worker:latest']
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:latest']
     id: push-worker
     waitFor: ['build-worker']
 
@@ -49,13 +61,13 @@ steps:
       - 'deploy'
       - 'api-service'
       - '--image'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/api:latest'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:latest'
       - '--region'
-      - 'us-central1'
+      - '${_REGION}'
       - '--service-account'
       - 'api-sa@$PROJECT_ID.iam.gserviceaccount.com'
       - '--set-env-vars'
-      - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=us-central1,UPLOADS_BUCKET=$PROJECT_ID-uploads,ASSETS_BUCKET=$PROJECT_ID-assets,FIRESTORE_DATABASE=(default),PUBSUB_TOPIC=content-generation-jobs,CORS_ORIGIN=https://golden007-prog.github.io,VERTEX_TEXT_MODEL=gemini-2.5-flash,VERTEX_TEXT_FALLBACK_MODEL=gemini-2.5-flash,VERTEX_REASONING_MODEL=gemini-2.5-pro,VERTEX_IMAGE_MODEL=gemini-2.5-flash,VERTEX_IMAGE_HQ_MODEL=gemini-2.5-pro'
+      - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},UPLOADS_BUCKET=$PROJECT_ID-uploads,ASSETS_BUCKET=$PROJECT_ID-assets,FIRESTORE_DATABASE=(default),PUBSUB_TOPIC=content-generation-jobs,CORS_ORIGIN=https://golden007-prog.github.io,VERTEX_TEXT_MODEL=gemini-2.5-flash,VERTEX_TEXT_FALLBACK_MODEL=gemini-2.5-flash,VERTEX_REASONING_MODEL=gemini-2.5-pro,VERTEX_IMAGE_MODEL=gemini-2.5-flash,VERTEX_IMAGE_HQ_MODEL=gemini-2.5-pro'
       - '--allow-unauthenticated'
       - '--memory'
       - '512Mi'
@@ -77,13 +89,13 @@ steps:
       - 'deploy'
       - 'worker-service'
       - '--image'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/worker:latest'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:latest'
       - '--region'
-      - 'us-central1'
+      - '${_REGION}'
       - '--service-account'
       - 'worker-sa@$PROJECT_ID.iam.gserviceaccount.com'
       - '--set-env-vars'
-      - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=us-central1,UPLOADS_BUCKET=$PROJECT_ID-uploads,ASSETS_BUCKET=$PROJECT_ID-assets,TEMP_BUCKET=$PROJECT_ID-temp,FIRESTORE_DATABASE=(default),PUBSUB_SUBSCRIPTION=content-generation-jobs-sub,VERTEX_TEXT_MODEL=gemini-2.5-flash,VERTEX_TEXT_FALLBACK_MODEL=gemini-2.5-flash,VERTEX_REASONING_MODEL=gemini-2.5-pro,VERTEX_IMAGE_MODEL=gemini-2.5-flash,VERTEX_IMAGE_HQ_MODEL=gemini-2.5-pro'
+      - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},UPLOADS_BUCKET=$PROJECT_ID-uploads,ASSETS_BUCKET=$PROJECT_ID-assets,TEMP_BUCKET=$PROJECT_ID-temp,FIRESTORE_DATABASE=(default),PUBSUB_SUBSCRIPTION=content-generation-jobs-sub,VERTEX_TEXT_MODEL=gemini-2.5-flash,VERTEX_TEXT_FALLBACK_MODEL=gemini-2.5-flash,VERTEX_REASONING_MODEL=gemini-2.5-pro,VERTEX_IMAGE_MODEL=gemini-2.5-flash,VERTEX_IMAGE_HQ_MODEL=gemini-2.5-pro'
       - '--no-allow-unauthenticated'
       - '--memory'
       - '1Gi'
@@ -100,8 +112,8 @@ steps:
     waitFor: ['push-worker']
 
 images:
-  - 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/api:latest'
-  - 'us-central1-docker.pkg.dev/$PROJECT_ID/content-storyteller/worker:latest'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:latest'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:latest'
 
 options:
   logging: CLOUD_LOGGING_ONLY

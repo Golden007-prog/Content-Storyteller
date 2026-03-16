@@ -240,7 +240,7 @@ describe('Property 2.1 (PBT): GenerateImages persists ImageConcept JSON array an
 
       // Preservation: image-concepts JSON was written to storage
       const conceptPaths = Array.from(mocks.writtenAssets.keys()).filter(
-        (k) => k.includes('image-concepts') && k.endsWith('.json'),
+        (k) => k.includes('image-concept') && k.endsWith('.json'),
       );
       expect(conceptPaths.length).toBe(1);
 
@@ -344,11 +344,11 @@ describe('Property 2.2 (PBT): GenerateVideo persists Storyboard as AssetType.Sto
       // Preservation: stage returns success: true
       expect(result.success).toBe(true);
 
-      // Preservation: storyboard JSON was written to storage
+      // Preservation: storyboard JSON was written to storage (UUID-named + stable storyboard.json)
       const storyboardPaths = Array.from(mocks.writtenAssets.keys()).filter(
         (k) => k.includes('storyboard') && k.endsWith('.json'),
       );
-      expect(storyboardPaths.length).toBe(1);
+      expect(storyboardPaths.length).toBeGreaterThanOrEqual(1);
 
       // Preservation: storyboard asset recorded as AssetType.Storyboard
       const finalJob = mocks.jobStore.get(jobId)!;

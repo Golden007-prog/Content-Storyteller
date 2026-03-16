@@ -1,6 +1,7 @@
 import { Firestore } from '@google-cloud/firestore';
 import { Job, JobState, AssetReference, FallbackNotice, StepsMap, StepMetadata, JobWarning } from '@content-storyteller/shared';
 import { getGcpConfig } from '../config/gcp';
+import { isAlloyDbConfigured, createAssetRecord } from './alloydb';
 
 function getDb(): Firestore {
   const cfg = getGcpConfig();
@@ -37,16 +38,37 @@ export async function updateJobState(
 
 /**
  * Append an asset reference to the Job's assets array.
+ * Also writes the asset record to AlloyDB (best-effort).
  */
 export async function recordAssetReference(
   jobId: string,
   asset: AssetReference,
 ): Promise<void> {
+  // Primary write: Firestore (for SSE / real-time UI)
   const doc = await jobs().doc(jobId).get();
   if (!doc.exists) throw new Error(`Job ${jobId} not found`);
   const job = doc.data() as Job;
   const assets = [...job.assets, asset];
   await jobs().doc(jobId).update({ assets, updatedAt: new Date() });
+
+  // Secondary write: AlloyDB (best-effort, for relational queries)
+  if (isAlloyDbConfigured()) {
+    try {
+      await createAssetRecord({
+        job_id: asset.jobId,
+        asset_type: asset.assetType,
+        storage_path: asset.storagePath,
+        status: asset.status ?? 'completed',
+        is_fallback: false,
+      });
+    } catch (err) {
+      console.error(
+        `[Dual-Write] AlloyDB asset write failed for job ${jobId}, asset ${asset.assetId}:`,
+        err instanceof Error ? err.message : err,
+      );
+      // AlloyDB failure must NOT affect the Firestore write
+    }
+  }
 }
 
 /**

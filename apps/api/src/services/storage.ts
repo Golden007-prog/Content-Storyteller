@@ -1,5 +1,6 @@
 import { Storage } from '@google-cloud/storage';
 import { getGcpConfig } from '../config/gcp';
+import { logger } from '../middleware/logger';
 
 function getStorage(): Storage {
   const cfg = getGcpConfig();
@@ -95,6 +96,35 @@ export async function generateSignedUrl(storagePath: string): Promise<string> {
       return `${apiBaseUrl}/api/v1/assets/${encodeURIComponent(storagePath)}`;
     }
     throw err;
+  }
+}
+
+/** Result of a safe signed URL generation attempt. */
+export interface SignedUrlResult {
+  /** The resolved URL, or empty string on failure. */
+  url: string;
+  /** Error reason when URL generation failed; undefined on success. */
+  error?: string;
+}
+
+/**
+ * Safe variant of generateSignedUrl that never throws.
+ *
+ * On success returns `{ url }`. On failure logs the error with the asset
+ * storage path and returns `{ url: '', error: reason }` so callers can
+ * surface the failure in API response metadata without crashing.
+ */
+export async function generateSignedUrlSafe(storagePath: string): Promise<SignedUrlResult> {
+  try {
+    const url = await generateSignedUrl(storagePath);
+    return { url };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    logger.error('Signed URL generation failed', {
+      storagePath,
+      error: reason,
+    });
+    return { url: '', error: reason };
   }
 }
 

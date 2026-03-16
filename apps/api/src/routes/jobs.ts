@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import archiver from 'archiver';
 import { createJob, getJob, queryAssets } from '../services/firestore';
 import { publishGenerationTask } from '../services/pubsub';
-import { generateSignedUrl } from '../services/storage';
+import { generateSignedUrl, generateSignedUrlSafe } from '../services/storage';
 import { resolveOutputIntent } from '../services/planner/output-intent';
 import {
   CreateJobRequest,
@@ -256,19 +256,37 @@ router.get('/:jobId/assets', async (req: Request, res: Response, next: NextFunct
 
     const assets = await queryAssets(jobId);
 
-    // Generate signed URLs for each asset reference
+    // Define fallback and renderable asset types
+    const fallbackTypes: string[] = ['image_concept', 'video_brief_meta', 'gif_creative_direction'];
+    const renderableTypes: string[] = ['image', 'video', 'gif'];
+
+    // Generate signed URLs and enrich each asset reference
     const assetsWithUrls: AssetReferenceWithUrl[] = await Promise.all(
       assets.map(async (asset) => {
-        try {
-          const signedUrl = await generateSignedUrl(asset.storagePath);
-          return { ...asset, signedUrl };
-        } catch (err) {
+        const isFallback = fallbackTypes.includes(asset.assetType);
+        const isRenderable = renderableTypes.includes(asset.assetType);
+        const result = await generateSignedUrlSafe(asset.storagePath);
+        if (result.error) {
           logger.error(`Failed to generate signed URL for asset ${asset.assetId}`, {
             correlationId: req.correlationId,
-            error: err,
+            error: result.error,
           });
-          return { ...asset, signedUrl: '' };
+          return {
+            ...asset,
+            signedUrl: '',
+            isFallback,
+            previewUrl: '',
+            downloadUrl: '',
+            urlError: result.error,
+          };
         }
+        return {
+          ...asset,
+          signedUrl: result.url,
+          isFallback,
+          previewUrl: isRenderable ? result.url : '',
+          downloadUrl: !isFallback ? result.url : '',
+        };
       }),
     );
 
@@ -345,16 +363,99 @@ router.get('/:jobId/bundle', async (req: Request, res: Response, next: NextFunct
       });
       archive.pipe(res);
 
+      // Classify assets into deliverables vs fallback metadata
+      const fallbackTypes: string[] = ['image_concept', 'video_brief_meta', 'gif_creative_direction'];
+
+      // Text asset type to descriptive filename mapping
+      const textFilenameMap: Record<string, string> = {
+        copy: 'copy-package.txt',
+        caption: 'caption.txt',
+        hashtags: 'hashtags.txt',
+        call_to_action: 'call-to-action.txt',
+        voiceover_script: 'voiceover-script.txt',
+        on_screen_text: 'on-screen-text.txt',
+        storyboard: 'storyboard.txt',
+      };
+
+      // Fallback metadata type to descriptive filename mapping
+      const metadataFilenameMap: Record<string, string> = {
+        image_concept: 'image-concept.json',
+        video_brief_meta: 'video-brief.json',
+        gif_creative_direction: 'gif-direction.json',
+      };
+
+      // Track image counter for descriptive naming
+      let imageCounter = 0;
+      const manifestEntries: Array<{
+        filename: string;
+        assetType: string;
+        assetId: string;
+        isFallback: boolean;
+        storagePath: string;
+      }> = [];
+
       for (const asset of assetsWithUrls) {
         if (!asset.signedUrl) continue;
+
+        const isFallback = fallbackTypes.includes(asset.assetType);
+
         try {
           const fetchRes = await fetch(asset.signedUrl);
           if (!fetchRes.ok || !fetchRes.body) continue;
-          const filename =
-            asset.storagePath.split('/').pop() || `${asset.assetId}.bin`;
-          // Convert web ReadableStream to Node buffer then append
           const arrayBuffer = await fetchRes.arrayBuffer();
-          archive.append(Buffer.from(arrayBuffer), { name: filename });
+          const contentBuffer = Buffer.from(arrayBuffer);
+
+          let filename: string;
+
+          if (isFallback) {
+            // Place fallback metadata in metadata/ subdirectory
+            filename = `metadata/${metadataFilenameMap[asset.assetType] || `${asset.assetId}.json`}`;
+          } else if (asset.assetType === 'image') {
+            // Descriptive image filenames: image-1.png, image-2.png, etc.
+            imageCounter++;
+            const ext = asset.storagePath.endsWith('.jpg') ? '.jpg' : '.png';
+            filename = `image-${imageCounter}${ext}`;
+          } else if (asset.assetType === 'video') {
+            filename = 'video.mp4';
+          } else if (asset.assetType === 'gif') {
+            const ext = asset.storagePath.endsWith('.mp4') ? '.mp4' : '.gif';
+            filename = ext === '.gif' ? 'animation.gif' : 'loop.mp4';
+          } else if (textFilenameMap[asset.assetType]) {
+            // Text deliverables with descriptive filenames
+            filename = textFilenameMap[asset.assetType];
+          } else {
+            // Fallback for unknown types
+            filename = asset.storagePath.split('/').pop() || `${asset.assetId}.bin`;
+          }
+
+          archive.append(contentBuffer, { name: filename });
+          manifestEntries.push({
+            filename,
+            assetType: asset.assetType,
+            assetId: asset.assetId,
+            isFallback,
+            storagePath: asset.storagePath,
+          });
+
+          // For storyboard, also include a .json version alongside the .txt
+          if (asset.assetType === 'storyboard') {
+            // Try to parse the content as JSON; if it's already JSON, include as storyboard.json
+            try {
+              const textContent = contentBuffer.toString('utf-8');
+              JSON.parse(textContent);
+              // Content is valid JSON — include as storyboard.json
+              archive.append(contentBuffer, { name: 'storyboard.json' });
+              manifestEntries.push({
+                filename: 'storyboard.json',
+                assetType: 'storyboard',
+                assetId: asset.assetId,
+                isFallback: false,
+                storagePath: asset.storagePath,
+              });
+            } catch {
+              // Not valid JSON — skip the .json version
+            }
+          }
         } catch (err) {
           logger.error(`Failed to fetch asset for ZIP: ${asset.assetId}`, {
             correlationId: req.correlationId,
@@ -362,6 +463,16 @@ router.get('/:jobId/bundle', async (req: Request, res: Response, next: NextFunct
           });
         }
       }
+
+      // Generate and include manifest.json at ZIP root
+      const manifestJson = {
+        jobId,
+        generatedAt: new Date().toISOString(),
+        platform: job.platform ?? null,
+        tone: job.tone ?? null,
+        assets: manifestEntries,
+      };
+      archive.append(JSON.stringify(manifestJson, null, 2), { name: 'manifest.json' });
 
       await archive.finalize();
       return;

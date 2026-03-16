@@ -6,13 +6,13 @@ import {
   getModel,
   getLocation,
 } from '@content-storyteller/shared';
-import { VertexAI } from '@google-cloud/vertexai';
 import { getGcpConfig } from '../config/gcp';
 
 /**
- * Image generation capability backed by Vertex AI.
+ * Image generation capability backed by Vertex AI Imagen API.
+ * Uses the Imagen REST API (predict endpoint) to generate real binary images.
  * Checks availability via a lightweight API probe and handles
- * access-denied (403) errors gracefully by reporting unavailable.
+ * access-denied (403/401) errors gracefully by reporting unavailable.
  */
 export class ImageGenerationCapability implements GenerationCapability {
   readonly name = 'image_generation';
@@ -27,20 +27,19 @@ export class ImageGenerationCapability implements GenerationCapability {
       return this.cachedAvailability;
     }
 
+    if (!getGcpConfig().projectId) {
+      this.cachedAvailability = false;
+      this.lastCheckTime = now;
+      return false;
+    }
+
     try {
-      const cfg = getGcpConfig();
-      const vertexAI = new VertexAI({ project: cfg.projectId, location: getLocation('image') });
-      // Attempt to instantiate the generative model — this validates credentials
-      // and project access without making a full generation call
-      vertexAI.getGenerativeModel({ model: getModel('image') });
+      const { GoogleAuth } = await import('google-auth-library');
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      await auth.getAccessToken();
       this.cachedAvailability = true;
     } catch (err: unknown) {
-      if (isAccessDenied(err)) {
-        this.cachedAvailability = false;
-      } else {
-        // Transient errors — assume unavailable but don't cache long
-        this.cachedAvailability = false;
-      }
+      this.cachedAvailability = false;
     }
 
     this.lastCheckTime = now;
@@ -53,23 +52,61 @@ export class ImageGenerationCapability implements GenerationCapability {
     const brief = data.brief as CreativeBrief | undefined;
 
     try {
-      const cfg = getGcpConfig();
-      const vertexAI = new VertexAI({ project: cfg.projectId, location: getLocation('image') });
-      const model = vertexAI.getGenerativeModel({ model: getModel('image') });
+      const { GoogleAuth } = await import('google-auth-library');
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const accessToken = await auth.getAccessToken();
 
+      if (!accessToken) {
+        return { success: false, assets: [], metadata: { reason: 'no-access-token' } };
+      }
+
+      const cfg = getGcpConfig();
+      const location = getLocation('image');
+      const model = getModel('image');
       const imagePrompt = prompt || buildImagePrompt(brief);
 
-      const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: imagePrompt }] }],
+      // Imagen REST API predict endpoint
+      const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${cfg.projectId}/locations/${location}/publishers/google/models/${model}:predict`;
+
+      const requestBody = {
+        instances: [{ prompt: imagePrompt }],
+        parameters: {
+          sampleCount: 1,
+          aspectRatio: '1:1',
+        },
+      };
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
       });
 
-      const responseText =
-        result.response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      if (!response.ok) {
+        const errorText = await response.text();
+        if (isAccessDeniedStatus(response.status) || isAccessDeniedMessage(errorText)) {
+          return { success: false, assets: [], metadata: { reason: 'access-denied', detail: errorText } };
+        }
+        throw new Error(`Imagen API failed (${response.status}): ${errorText}`);
+      }
+
+      const result = await response.json() as {
+        predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
+      };
+
+      const base64Image = result.predictions?.[0]?.bytesBase64Encoded;
+
+      if (!base64Image) {
+        return { success: false, assets: [], metadata: { reason: 'no-image-data', jobId } };
+      }
 
       return {
         success: true,
-        assets: responseText ? [responseText] : [],
-        metadata: { jobId, model: getModel('image'), promptUsed: imagePrompt },
+        assets: [base64Image],
+        metadata: { jobId, model, promptUsed: imagePrompt },
       };
     } catch (err: unknown) {
       if (isAccessDenied(err)) {
@@ -89,13 +126,23 @@ function buildImagePrompt(brief?: CreativeBrief): string {
 - Key Messages: ${brief.keyMessages.join(', ')}`;
 }
 
+function isAccessDeniedStatus(status: number): boolean {
+  return status === 403 || status === 401;
+}
+
+function isAccessDeniedMessage(text: string): boolean {
+  const lower = text.toLowerCase();
+  return lower.includes('permission denied') || lower.includes('403') || lower.includes('unauthorized');
+}
+
 function isAccessDenied(err: unknown): boolean {
   if (err && typeof err === 'object') {
     const code = (err as Record<string, unknown>).code;
     const status = (err as Record<string, unknown>).status;
     if (code === 403 || code === '403' || status === 403 || status === '403') return true;
+    if (code === 401 || code === '401' || status === 401 || status === '401') return true;
     const message = String((err as Record<string, unknown>).message || '');
-    if (message.includes('403') || message.toLowerCase().includes('permission denied')) {
+    if (message.includes('403') || message.includes('401') || message.toLowerCase().includes('permission denied')) {
       return true;
     }
   }

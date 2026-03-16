@@ -6,9 +6,12 @@
 #   _REGION       — GCP region (default: us-central1)
 #   _AR_REPO      — Artifact Registry repository name (default: content-storyteller)
 #
-# Usage:
+# Usage (manual submit):
 #   gcloud builds submit --config cloudbuild.yaml \
 #     --substitutions=_REGION=us-central1,_AR_REPO=content-storyteller
+#
+# Usage (trigger-based — SHORT_SHA is auto-populated):
+#   Attach this config to a Cloud Build trigger on the main branch.
 
 substitutions:
   _REGION: us-central1
@@ -40,7 +43,7 @@ steps:
     args:
       - 'build'
       - '-t'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:$SHORT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:${SHORT_SHA:-latest}'
       - '-t'
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:latest'
       - '-f'
@@ -54,7 +57,7 @@ steps:
     args:
       - 'build'
       - '-t'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:$SHORT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:${SHORT_SHA:-latest}'
       - '-t'
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:latest'
       - '-f'
@@ -89,9 +92,20 @@ steps:
       - 'deploy'
       - 'api-service'
       - '--image'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:$SHORT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:latest'
       - '--region'
       - '${_REGION}'
+      - '--service-account'
+      - 'api-sa@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--allow-unauthenticated'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--max-instances'
+      - '3'
+      - '--concurrency'
+      - '80'
       - '--quiet'
     id: deploy-api
     waitFor: ['push-api']
@@ -104,17 +118,28 @@ steps:
       - 'deploy'
       - 'worker-service'
       - '--image'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:$SHORT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:latest'
       - '--region'
       - '${_REGION}'
+      - '--service-account'
+      - 'worker-sa@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--no-allow-unauthenticated'
+      - '--memory'
+      - '1Gi'
+      - '--cpu'
+      - '2'
+      - '--max-instances'
+      - '3'
+      - '--concurrency'
+      - '1'
+      - '--timeout'
+      - '600'
       - '--quiet'
     id: deploy-worker
     waitFor: ['push-worker']
 
 images:
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:$SHORT_SHA'
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:latest'
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:$SHORT_SHA'
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:latest'
 
 options:

@@ -31,7 +31,9 @@
         "@google-cloud/observability-mcp"
       ],
       "disabled": false,
-      "autoApprove": []
+      "autoApprove": [
+        "list_log_entries"
+      ]
     }
   }
 }

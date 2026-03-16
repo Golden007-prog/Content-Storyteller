@@ -19,6 +19,7 @@ import { readUpload } from '../services/storage';
 import { createLogger } from '../middleware/logger';
 import { randomUUID } from 'crypto';
 import { capabilityRegistry } from '../capabilities/capability-registry';
+import { getProjectId, buildStoragePath } from './storage-paths';
 
 /**
  * Map an ImageClassification to the appropriate GifStylePreset.
@@ -339,6 +340,7 @@ export class GenerateGif implements PipelineStage {
       });
 
       // ── Step 5: Check capability and render ──────────────────────────
+      const projectId = getProjectId(context.workingData);
       const gifCapability = capabilityRegistry.get('gif_generation');
       const isAvailable = gifCapability ? await gifCapability.isAvailable() : false;
 
@@ -359,7 +361,7 @@ export class GenerateGif implements PipelineStage {
             // Capability returns base64-encoded MP4 data; persist as GIF
             for (const assetData of genResult.assets) {
               const assetId = randomUUID();
-              const gifPath = `${context.jobId}/gifs/${assetId}.gif`;
+              const gifPath = buildStoragePath(projectId, context.jobId, 'gif', `${assetId}.gif`);
               const gifBuffer = Buffer.from(assetData, 'base64');
               await writeAsset(gifPath, gifBuffer, 'image/gif');
 
@@ -388,7 +390,7 @@ export class GenerateGif implements PipelineStage {
               stage: this.jobState,
             });
             // Persist creative direction as fallback
-            await this.persistCreativeDirection(context.jobId, motionConcept, storyboard, assets);
+            await this.persistCreativeDirection(context.jobId, motionConcept, storyboard, assets, projectId);
           }
         } catch (genErr) {
           log.warn('GIF generation failed, persisting creative direction', {
@@ -404,7 +406,7 @@ export class GenerateGif implements PipelineStage {
           });
 
           // Persist creative direction as fallback
-          await this.persistCreativeDirection(context.jobId, motionConcept, storyboard, assets);
+          await this.persistCreativeDirection(context.jobId, motionConcept, storyboard, assets, projectId);
         }
       } else {
         // Capability unavailable — persist creative direction
@@ -416,7 +418,7 @@ export class GenerateGif implements PipelineStage {
           timestamp: new Date(),
           stage: this.jobState,
         });
-        await this.persistCreativeDirection(context.jobId, motionConcept, storyboard, assets);
+        await this.persistCreativeDirection(context.jobId, motionConcept, storyboard, assets, projectId);
       }
 
       // Store in working data for downstream stages
@@ -440,10 +442,11 @@ export class GenerateGif implements PipelineStage {
     motionConcept: GifMotionConcept,
     storyboard: GifStoryboard,
     assets: string[],
+    projectId: string,
   ): Promise<void> {
     // Persist motion concept
     const motionAssetId = randomUUID();
-    const motionPath = `${jobId}/gif-motion-concept/${motionAssetId}.json`;
+    const motionPath = buildStoragePath(projectId, jobId, 'metadata', `gif-motion-concept-${motionAssetId}.json`);
     await writeAsset(motionPath, Buffer.from(JSON.stringify(motionConcept, null, 2), 'utf-8'), 'application/json');
     await recordAssetReference(jobId, {
       assetId: motionAssetId,
@@ -457,7 +460,7 @@ export class GenerateGif implements PipelineStage {
 
     // Persist storyboard
     const storyboardAssetId = randomUUID();
-    const storyboardPath = `${jobId}/gif-storyboard/${storyboardAssetId}.json`;
+    const storyboardPath = buildStoragePath(projectId, jobId, 'metadata', `gif-storyboard-${storyboardAssetId}.json`);
     await writeAsset(storyboardPath, Buffer.from(JSON.stringify(storyboard, null, 2), 'utf-8'), 'application/json');
     await recordAssetReference(jobId, {
       assetId: storyboardAssetId,

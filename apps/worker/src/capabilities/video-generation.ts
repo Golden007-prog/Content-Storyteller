@@ -11,8 +11,10 @@ import {
 
 import { getGcpConfig } from '../config/gcp';
 
-const VIDEO_POLL_INTERVAL_MS = 15_000; // 15 seconds between polls
-const VIDEO_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes (reduced from 10 to avoid consuming entire pipeline timeout)
+const VIDEO_POLL_INTERVAL_BASE_MS = 15_000; // initial poll interval
+const VIDEO_POLL_INTERVAL_CAP_MS = 120_000; // max poll interval after backoff
+const VIDEO_TIMEOUT_MS = Number(process.env.VIDEO_GENERATION_TIMEOUT_MS) || 5 * 60 * 1000; // configurable, default 5 min
+const CONSECUTIVE_TRANSIENT_WARN_THRESHOLD = 5;
 
 /**
  * Video generation capability backed by Vertex AI Veo API.
@@ -143,6 +145,8 @@ export class VideoGenerationCapability implements GenerationCapability {
 
   /**
    * Poll the Vertex AI long-running operation until completion or timeout.
+   * Uses exponential backoff: 15s → 30s → 60s → 120s (cap) after transient errors.
+   * Resets interval to 15s after a successful (OK) poll response.
    * Returns base64-encoded video data on success, or a structured metadata
    * object on timeout so the caller can surface a specific reason.
    * Includes per-poll logging for diagnosability.
@@ -155,9 +159,11 @@ export class VideoGenerationCapability implements GenerationCapability {
     const deadline = Date.now() + VIDEO_TIMEOUT_MS;
     const startTime = Date.now();
     let pollCount = 0;
+    let currentIntervalMs = VIDEO_POLL_INTERVAL_BASE_MS;
+    let consecutiveTransientErrors = 0;
 
     while (Date.now() < deadline) {
-      await sleep(VIDEO_POLL_INTERVAL_MS);
+      await sleep(currentIntervalMs);
       pollCount++;
       const elapsedMs = Date.now() - startTime;
 
@@ -168,13 +174,34 @@ export class VideoGenerationCapability implements GenerationCapability {
 
       if (!pollResponse.ok) {
         const errorText = await pollResponse.text();
-        console.log(JSON.stringify({ level: 'warn', msg: 'Veo poll non-OK response', pollCount, elapsedMs, operationName, status: 'transient-error' }));
+        consecutiveTransientErrors++;
+
+        // Exponential backoff: double interval after transient error, cap at 120s
+        currentIntervalMs = Math.min(currentIntervalMs * 2, VIDEO_POLL_INTERVAL_CAP_MS);
+
+        console.log(JSON.stringify({
+          level: consecutiveTransientErrors > CONSECUTIVE_TRANSIENT_WARN_THRESHOLD ? 'error' : 'warn',
+          msg: consecutiveTransientErrors > CONSECUTIVE_TRANSIENT_WARN_THRESHOLD
+            ? 'Veo poll excessive consecutive transient errors'
+            : 'Veo poll non-OK response',
+          pollCount,
+          elapsedMs,
+          currentIntervalMs,
+          operationName,
+          status: 'transient-error',
+          consecutiveTransientErrors,
+        }));
+
         if (isAccessDeniedStatus(pollResponse.status)) {
           throw Object.assign(new Error(`Poll access denied: ${errorText}`), { code: 403 });
         }
-        // Transient error — continue polling
+        // Transient error — continue polling with increased interval
         continue;
       }
+
+      // Successful response — reset backoff
+      consecutiveTransientErrors = 0;
+      currentIntervalMs = VIDEO_POLL_INTERVAL_BASE_MS;
 
       const pollResult = await pollResponse.json() as {
         done?: boolean;
@@ -188,7 +215,7 @@ export class VideoGenerationCapability implements GenerationCapability {
       };
 
       const status = pollResult.done ? 'done' : pollResult.error ? 'error' : 'pending';
-      console.log(JSON.stringify({ level: 'info', msg: 'Veo poll iteration', pollCount, elapsedMs, operationName, status }));
+      console.log(JSON.stringify({ level: 'info', msg: 'Veo poll iteration', pollCount, elapsedMs, currentIntervalMs, operationName, status }));
 
       if (pollResult.error) {
         throw new Error(`Veo operation failed: ${pollResult.error.message || 'Unknown error'}`);
@@ -206,7 +233,7 @@ export class VideoGenerationCapability implements GenerationCapability {
 
     // Timeout reached — log structured warning
     const totalElapsed = Date.now() - startTime;
-    console.log(JSON.stringify({ level: 'warn', msg: 'Veo polling timeout', pollCount, elapsedMs: totalElapsed, operationName, timeoutMs: VIDEO_TIMEOUT_MS }));
+    console.log(JSON.stringify({ level: 'warn', msg: 'Veo polling timeout', pollCount, elapsedMs: totalElapsed, currentIntervalMs, operationName, timeoutMs: VIDEO_TIMEOUT_MS }));
     return { timeout: true, reason: 'video-generation-timeout', pollCount, elapsedMs: totalElapsed, operationName };
   }
 }
