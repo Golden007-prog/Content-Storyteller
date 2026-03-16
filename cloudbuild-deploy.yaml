@@ -9,7 +9,6 @@
 substitutions:
   _REGION: us-central1
   _AR_REPO: content-storyteller
-  _TAG: latest
 
 steps:
   # 1. Install dependencies
