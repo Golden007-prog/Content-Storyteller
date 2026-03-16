@@ -11,10 +11,11 @@ import {
 
 import { getGcpConfig } from '../config/gcp';
 
-const VIDEO_POLL_INTERVAL_BASE_MS = 15_000; // initial poll interval
-const VIDEO_POLL_INTERVAL_CAP_MS = 120_000; // max poll interval after backoff
-const VIDEO_DEFAULT_TIMEOUT_MS = Number(process.env.VIDEO_GENERATION_TIMEOUT_MS) || 10 * 60 * 1000; // configurable, default 10 min
+const VIDEO_POLL_INTERVAL_BASE_MS = 10_000; // initial poll interval (10s)
+const VIDEO_POLL_INTERVAL_CAP_MS = 30_000; // max poll interval after backoff (30s, not 120s)
+const VIDEO_DEFAULT_TIMEOUT_MS = Number(process.env.VIDEO_GENERATION_TIMEOUT_MS) || 15 * 60 * 1000; // configurable, default 15 min
 const CONSECUTIVE_TRANSIENT_WARN_THRESHOLD = 5;
+const TOKEN_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // refresh access token every 5 min
 
 /**
  * Video generation capability backed by Vertex AI Veo API.
@@ -149,11 +150,11 @@ export class VideoGenerationCapability implements GenerationCapability {
 
   /**
    * Poll the Vertex AI long-running operation until completion or timeout.
-   * Uses exponential backoff: 15s → 30s → 60s → 120s (cap) after transient errors.
-   * Resets interval to 15s after a successful (OK) poll response.
+   * Uses gentle backoff: 10s → 15s → 20s → 25s → 30s (cap) after transient errors.
+   * Resets interval to 10s after a successful (OK) poll response.
+   * Refreshes the access token every 5 minutes to avoid token expiry during long polls.
    * Returns base64-encoded video data on success, or a structured metadata
    * object on timeout so the caller can surface a specific reason.
-   * Includes per-poll logging for diagnosability.
    */
   private async pollForCompletion(
     operationName: string,
@@ -166,26 +167,64 @@ export class VideoGenerationCapability implements GenerationCapability {
     let pollCount = 0;
     let currentIntervalMs = VIDEO_POLL_INTERVAL_BASE_MS;
     let consecutiveTransientErrors = 0;
+    let currentToken = accessToken;
+    let lastTokenRefresh = Date.now();
 
     while (Date.now() < deadline) {
       await sleep(currentIntervalMs);
       pollCount++;
       const elapsedMs = Date.now() - startTime;
 
-      const pollResponse = await fetch(pollEndpoint, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${accessToken}` },
-      });
+      // Refresh access token periodically to avoid expiry during long polls
+      if (Date.now() - lastTokenRefresh > TOKEN_REFRESH_INTERVAL_MS) {
+        try {
+          const { GoogleAuth } = await import('google-auth-library');
+          const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+          const newToken = await auth.getAccessToken();
+          if (newToken) {
+            currentToken = newToken;
+            lastTokenRefresh = Date.now();
+            console.log(JSON.stringify({ level: 'info', msg: 'Refreshed access token for Veo polling', pollCount, elapsedMs }));
+          }
+        } catch {
+          // Token refresh failed — continue with existing token
+          console.log(JSON.stringify({ level: 'warn', msg: 'Failed to refresh access token, continuing with existing', pollCount, elapsedMs }));
+        }
+      }
+
+      let pollResponse: Response;
+      try {
+        pollResponse = await fetch(pollEndpoint, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${currentToken}` },
+        });
+      } catch (fetchErr) {
+        // Network error — treat as transient, continue polling
+        consecutiveTransientErrors++;
+        currentIntervalMs = Math.min(currentIntervalMs + 5_000, VIDEO_POLL_INTERVAL_CAP_MS);
+        console.log(JSON.stringify({
+          level: 'warn',
+          msg: 'Veo poll network error',
+          pollCount,
+          elapsedMs,
+          currentIntervalMs,
+          operationName,
+          error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
+          consecutiveTransientErrors,
+        }));
+        continue;
+      }
 
       if (!pollResponse.ok) {
         const errorText = await pollResponse.text();
         consecutiveTransientErrors++;
 
-        // Exponential backoff: double interval after transient error, cap at 120s
-        currentIntervalMs = Math.min(currentIntervalMs * 2, VIDEO_POLL_INTERVAL_CAP_MS);
+        // Gentle backoff: add 5s per transient error, cap at 30s
+        currentIntervalMs = Math.min(currentIntervalMs + 5_000, VIDEO_POLL_INTERVAL_CAP_MS);
 
+        const logLevel = consecutiveTransientErrors > CONSECUTIVE_TRANSIENT_WARN_THRESHOLD ? 'error' : 'warn';
         console.log(JSON.stringify({
-          level: consecutiveTransientErrors > CONSECUTIVE_TRANSIENT_WARN_THRESHOLD ? 'error' : 'warn',
+          level: logLevel,
           msg: consecutiveTransientErrors > CONSECUTIVE_TRANSIENT_WARN_THRESHOLD
             ? 'Veo poll excessive consecutive transient errors'
             : 'Veo poll non-OK response',
@@ -194,10 +233,25 @@ export class VideoGenerationCapability implements GenerationCapability {
           currentIntervalMs,
           operationName,
           status: 'transient-error',
+          httpStatus: pollResponse.status,
           consecutiveTransientErrors,
         }));
 
         if (isAccessDeniedStatus(pollResponse.status)) {
+          // Try refreshing token once before giving up on 401/403
+          if (consecutiveTransientErrors <= 2) {
+            try {
+              const { GoogleAuth } = await import('google-auth-library');
+              const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+              const newToken = await auth.getAccessToken();
+              if (newToken) {
+                currentToken = newToken;
+                lastTokenRefresh = Date.now();
+                console.log(JSON.stringify({ level: 'info', msg: 'Refreshed token after auth error', pollCount }));
+              }
+            } catch { /* continue */ }
+            continue;
+          }
           throw Object.assign(new Error(`Poll access denied: ${errorText}`), { code: 403 });
         }
         // Transient error — continue polling with increased interval
