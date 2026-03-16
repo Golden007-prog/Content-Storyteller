@@ -93,7 +93,9 @@ describe('Test Bug1 (PBT): generateSignedUrl must fall back to proxy URL in clou
 
     // Simulate cloud environment
     const origKService = process.env.K_SERVICE;
+    const origApiBaseUrl = process.env.API_BASE_URL;
     process.env.K_SERVICE = 'content-storyteller-api';
+    process.env.API_BASE_URL = 'https://api-service-aqzftcmcyq-uc.a.run.app';
 
     // Reset config so isCloud picks up K_SERVICE
     const { _resetConfigForTesting } = await import('../config/gcp');
@@ -150,6 +152,11 @@ describe('Test Bug1 (PBT): generateSignedUrl must fall back to proxy URL in clou
         process.env.K_SERVICE = origKService;
       } else {
         delete process.env.K_SERVICE;
+      }
+      if (origApiBaseUrl !== undefined) {
+        process.env.API_BASE_URL = origApiBaseUrl;
+      } else {
+        delete process.env.API_BASE_URL;
       }
       const { _resetConfigForTesting: reset } = await import('../config/gcp');
       reset();

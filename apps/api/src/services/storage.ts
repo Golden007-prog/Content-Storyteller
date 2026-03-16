@@ -87,12 +87,10 @@ export async function generateSignedUrl(storagePath: string): Promise<string> {
       const port = process.env.PORT || '8080';
       return `http://localhost:${port}/api/v1/assets/${encodeURIComponent(storagePath)}`;
     }
-    // Cloud fallback: use the API's own proxy endpoint to stream the asset
-    const apiBaseUrl =
-      process.env.API_BASE_URL ||
-      (process.env.K_SERVICE && cfg.projectId
-        ? `https://${process.env.K_SERVICE}-${cfg.projectId}.run.app`
-        : '');
+    // Cloud fallback: proxy through the API's own asset endpoint.
+    // API_BASE_URL should be set as an env var on the Cloud Run service
+    // (e.g. https://api-service-aqzftcmcyq-uc.a.run.app).
+    const apiBaseUrl = process.env.API_BASE_URL || '';
     if (apiBaseUrl) {
       return `${apiBaseUrl}/api/v1/assets/${encodeURIComponent(storagePath)}`;
     }
