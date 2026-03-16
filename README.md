@@ -95,7 +95,7 @@ The resolved `OutputIntent` is persisted on the Job document so the worker, SSE 
 | Trend Analyzer | AI-powered trend discovery across Instagram Reels, X/Twitter, LinkedIn with momentum scoring |
 | Smart Pipeline Orchestration | Output-intent inference determines which stages to run per job |
 | GIF Generation | LinkedIn-optimized animated GIF creation from content assets |
-| Live Agent Panel | Real-time SSE streaming of pipeline progress with stage-by-stage updates |
+| Live Agent Voice Assistant | AI Creative Director with Vertex AI function calling, native audio output (gemini-live-2.5-flash-native-audio), browser speech-to-text via SpeechRecognition API, and animated audio equalizer |
 | Export Bundle | ZIP download of all generated assets with organized folder structure |
 | Model Router | Centralized Vertex AI model selection with env-var overrides and fallback chains |
 | Premium UI | Dark/light mode, responsive layout, platform-specific content previews |
@@ -309,6 +309,7 @@ npm run test:properties
 | Google Cloud Services | ✅ | 10 GCP services — Cloud Run, Storage, Firestore, Pub/Sub, Vertex AI, Artifact Registry, Secret Manager, Cloud Build, Cloud Logging, IAM |
 | Multimodal I/O | ✅ | Input: text, images, screenshots, voice notes. Output: copy, images, storyboards, voiceover scripts, video briefs, GIFs |
 | Real-Time Interaction | ✅ | SSE streaming, polling endpoint, real-time Firestore state transitions |
+| Voice AI Assistant | ✅ | Live Agent with Vertex AI function calling, native audio (gemini-live-2.5-flash-native-audio), browser SpeechRecognition, animated equalizer |
 | Trend Analysis | ✅ | Gemini-powered trend discovery with momentum scoring, freshness labels, and CTA integration |
 | Live Deployment | ✅ | Terraform-managed, Cloud Build CI/CD, GitHub Actions, one-command deploy scripts |
 
