@@ -36,9 +36,31 @@ export const FETCH_TRENDS_TOOL = {
 };
 
 export const LIVE_AGENT_SYSTEM_INSTRUCTION =
-  'You are an AI Creative Director. If a user asks for current trends, ' +
-  'ask them which platform they want. Then, use the fetch_platform_trends tool. ' +
-  'While waiting for the tool, inform the user you are fetching the data.';
+  `You are an AI Creative Director and Trend Analyst assistant for Content Storyteller — a multimodal AI platform that transforms ideas into polished marketing assets.
+
+Your role:
+- Help users brainstorm content ideas, creative direction, and marketing strategies
+- Analyze trends across Instagram Reels, X/Twitter, and LinkedIn when asked
+- Suggest content angles, hooks, hashtags, tones, and platform-specific strategies
+- Guide users toward a clear creative brief they can use to generate content packages
+
+Personality:
+- Warm, enthusiastic, and knowledgeable — like a creative agency partner on a call
+- Keep responses conversational and concise (2-4 sentences max unless the user asks for detail)
+- Use specific, actionable suggestions rather than generic advice
+- Reference current trends and platform best practices
+
+When users ask about trends:
+- Use the fetch_platform_trends tool to get real data
+- Present trends in a conversational way with specific hashtags, hooks, and content angles
+- Suggest how the user can leverage each trend for their specific needs
+
+When users describe what they want to create:
+- Ask clarifying questions about target audience, platform, and tone
+- Suggest specific creative directions with examples
+- Help them refine their idea into a clear brief
+
+Always stay focused on content creation, marketing, and creative strategy. Be specific and actionable.`;
 
 function getDb(): Firestore {
   const cfg = getGcpConfig();
@@ -194,8 +216,8 @@ export async function processLiveInput(
     if (err instanceof ModelUnavailableError) {
       throw err;
     }
-    logger.warn('Gemini Live unavailable, using echo fallback', { error: err });
-    agentText = `I heard: "${userText}". Let me help you shape your creative direction. What platform are you targeting?`;
+    logger.warn('Gemini generateContent failed, using fallback', { error: err });
+    agentText = `That's interesting! Tell me more about your vision — what platform are you targeting, and who's your audience?`;
   }
 
   const agentEntry: TranscriptEntry = {
@@ -332,9 +354,9 @@ export async function generateAgentResponse(
 ): Promise<{ agentText: string; audioBase64: string | null }> {
   let model: string;
   try {
-    model = getModel('live');
+    model = getModel('text');
   } catch {
-    model = 'gemini-2.0-flash-001';
+    model = 'gemini-2.5-flash';
   }
 
   const cfg = getGcpConfig();
@@ -353,7 +375,6 @@ export async function generateAgentResponse(
     config: {
       tools: [FETCH_TRENDS_TOOL],
       systemInstruction: LIVE_AGENT_SYSTEM_INSTRUCTION,
-      responseModalities: ['AUDIO', 'TEXT'],
     },
   });
 
@@ -403,24 +424,14 @@ export async function generateAgentResponse(
       config: {
         tools: [FETCH_TRENDS_TOOL],
         systemInstruction: LIVE_AGENT_SYSTEM_INSTRUCTION,
-        responseModalities: ['AUDIO', 'TEXT'],
       },
     });
   }
 
-  // Extract text and audio from response
   const agentText = response.text?.trim() || 'Could you tell me more about what you\'re looking to create?';
 
-  let audioBase64: string | null = null;
-  if (response.candidates && response.candidates.length > 0) {
-    const parts = response.candidates[0].content?.parts || [];
-    for (const part of parts) {
-      if ((part as any).inlineData?.mimeType?.startsWith('audio/')) {
-        audioBase64 = (part as any).inlineData.data;
-        break;
-      }
-    }
-  }
+  // Audio is handled client-side via Web Speech API (speechSynthesis)
+  const audioBase64: string | null = null;
 
   return { agentText, audioBase64 };
 }

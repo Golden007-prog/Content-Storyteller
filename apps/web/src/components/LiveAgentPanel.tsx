@@ -8,6 +8,24 @@ interface LiveAgentPanelProps {
   onUseCreativeDirection: (direction: ExtractedCreativeDirection) => void;
 }
 
+/**
+ * Speak text aloud using the Web Speech API (speechSynthesis).
+ * Returns a promise that resolves when speech ends.
+ */
+function speakText(text: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (!window.speechSynthesis) { resolve(); return; }
+    // Cancel any ongoing speech
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.05;
+    utterance.pitch = 1.0;
+    utterance.onend = () => resolve();
+    utterance.onerror = () => resolve();
+    window.speechSynthesis.speak(utterance);
+  });
+}
+
 export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
@@ -18,15 +36,20 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
   const [extractedDirection, setExtractedDirection] = useState<ExtractedCreativeDirection | null>(null);
   const [sessionEnded, setSessionEnded] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [speechSupported, setSpeechSupported] = useState(false);
+  const [ttsSupported, setTtsSupported] = useState(false);
   const recognitionRef = useRef<any>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const autoSendRef = useRef(false);
+  const pendingTextRef = useRef('');
 
   React.useEffect(() => { transcriptEndRef.current?.scrollIntoView?.({ behavior: 'smooth' }); }, [transcript]);
 
   React.useEffect(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     setSpeechSupported(!!SR);
+    setTtsSupported(!!window.speechSynthesis);
   }, []);
 
   const handleStartSession = useCallback(async () => {
@@ -35,32 +58,38 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
     catch (err) { setError(err instanceof Error ? err.message : 'Failed to start session'); }
   }, []);
 
-  const handleSendText = useCallback(async () => {
-    if (!sessionId || !inputText.trim() || isProcessing) return;
+  /**
+   * Core send function — sends text to the API, gets agent response,
+   * and speaks it aloud if voice is enabled.
+   */
+  const sendMessage = useCallback(async (text: string) => {
+    if (!sessionId || !text.trim() || isProcessing) return;
     setError(null); setIsProcessing(true);
     try {
-      const res = await sendLiveInput(sessionId, inputText.trim());
+      const res = await sendLiveInput(sessionId, text.trim());
       setTranscript(res.transcript);
       setInputText('');
 
-      // Play audio if available
-      if (res.audioBase64) {
-        try {
-          const audio = new Audio(`data:audio/pcm;base64,${res.audioBase64}`);
-          audio.onended = () => setIsSpeaking(false);
-          setIsSpeaking(true);
-          await audio.play();
-        } catch {
-          setIsSpeaking(false);
-        }
+      // Speak the agent's response using browser TTS
+      if (voiceEnabled && res.agentText) {
+        setIsSpeaking(true);
+        await speakText(res.agentText);
+        setIsSpeaking(false);
       }
     }
     catch (err) { setError(err instanceof Error ? err.message : 'Failed to send input'); }
     finally { setIsProcessing(false); }
-  }, [sessionId, inputText, isProcessing]);
+  }, [sessionId, isProcessing, voiceEnabled]);
+
+  const handleSendText = useCallback(async () => {
+    await sendMessage(inputText);
+  }, [sendMessage, inputText]);
 
   const handleStopSession = useCallback(async () => {
     if (!sessionId) return;
+    // Stop any ongoing speech
+    window.speechSynthesis?.cancel();
+    setIsSpeaking(false);
     setError(null); setIsProcessing(true);
     try {
       const res = await stopLiveSession(sessionId);
@@ -79,35 +108,57 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
     }
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
-      setError('Speech recognition is not supported in this browser. Please type your message instead.');
+      setError('Speech recognition is not supported in this browser.');
       return;
     }
+    // Stop any ongoing TTS so the mic doesn't pick up the agent's voice
+    window.speechSynthesis?.cancel();
+    setIsSpeaking(false);
+
     const recognition = new SR();
     recognition.continuous = false;
     recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    autoSendRef.current = false;
+    pendingTextRef.current = '';
+
     recognition.onresult = (event: any) => {
       const results = event.results;
-      let transcript = '';
+      let text = '';
+      let isFinal = false;
       for (let i = 0; i < results.length; i++) {
-        transcript += results[i][0].transcript;
+        text += results[i][0].transcript;
+        if (results[i].isFinal) isFinal = true;
       }
-      setInputText(transcript);
+      setInputText(text);
+      pendingTextRef.current = text;
+      if (isFinal) autoSendRef.current = true;
     };
+
     recognition.onerror = (event: any) => {
       setIsRecording(false);
-      // Only show persistent error for permission-denied; ignore transient errors like no-speech
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        setError('Microphone access denied. Please allow microphone permissions or type your message.');
+        setError('Microphone access denied. Please allow microphone permissions.');
       }
-      // For 'no-speech', 'aborted', 'network' etc., fail silently — user can just try again
     };
+
     recognition.onend = () => {
       setIsRecording(false);
+      // Auto-send when speech recognition completes with final text
+      if (autoSendRef.current && pendingTextRef.current.trim()) {
+        const textToSend = pendingTextRef.current.trim();
+        autoSendRef.current = false;
+        pendingTextRef.current = '';
+        // Use setTimeout to let state settle, then send
+        setTimeout(() => sendMessage(textToSend), 50);
+      }
     };
+
     recognitionRef.current = recognition;
     recognition.start();
     setIsRecording(true);
-  }, [isRecording]);
+  }, [isRecording, sendMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendText(); }
@@ -115,24 +166,13 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
 
   const handleExploreTrends = useCallback(async () => {
     if (!sessionId || isProcessing) return;
-    setInputText("What's trending right now? Show me the top trends for content creation.");
-    // Auto-send after a brief tick so the input is visible
-    setTimeout(() => {
-      handleSendText();
-    }, 0);
-  }, [sessionId, isProcessing, handleSendText]);
+    await sendMessage("What's trending right now? Show me the top trends across all platforms for content creation.");
+  }, [sessionId, isProcessing, sendMessage]);
 
-  /**
-   * Detect trend references in agent text (hashtags, trend keywords).
-   * Returns JSX with highlighted trend indicators.
-   */
   const renderMessageWithTrendIndicators = (text: string, role: string) => {
     if (role === 'user') return text;
-
-    // Highlight hashtags
     const parts = text.split(/(#\w+)/g);
     const hasTrendContent = parts.some((p) => p.startsWith('#'));
-
     return (
       <span>
         {parts.map((part, i) =>
@@ -164,13 +204,13 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
             <HeroSection
               icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>}
               title="Live Agent Mode"
-              subtitle="Chat with an AI Creative Director to brainstorm your content direction, then generate a full package from the conversation."
+              subtitle="Talk with an AI Creative Director — use your voice or type. Brainstorm content ideas, explore trends, and generate a full creative package from the conversation."
             >
               <button onClick={handleStartSession} className="btn-primary !py-3.5 !px-8 !text-base">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
                 Start Creative Session
               </button>
-              <p className="text-xs text-gray-400 mt-3">No credit card required. Free to try.</p>
+              <p className="text-xs text-gray-400 mt-3">Voice-enabled AI assistant. No credit card required.</p>
             </HeroSection>
           </div>
         </div>
@@ -191,22 +231,43 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
                   <div>
                     <p className="text-sm font-semibold text-gray-900">AI Creative Director</p>
                     <div className="flex items-center gap-1.5">
-                      <span className={`w-2 h-2 rounded-full ${sessionEnded ? 'bg-gray-400' : 'bg-green-500 animate-pulse'}`} />
-                      <span className="text-xs text-gray-500">{sessionEnded ? 'Session ended' : 'Online'}</span>
+                      <span className={`w-2 h-2 rounded-full ${sessionEnded ? 'bg-gray-400' : isSpeaking ? 'bg-brand-500 animate-pulse' : 'bg-green-500 animate-pulse'}`} />
+                      <span className="text-xs text-gray-500">{sessionEnded ? 'Session ended' : isSpeaking ? 'Speaking...' : 'Online'}</span>
                     </div>
                   </div>
                 </div>
-                {!sessionEnded && (
-                  <button onClick={handleStopSession} disabled={isProcessing} className="btn-ghost text-red-500 hover:text-red-700 hover:bg-red-50 !text-xs">
-                    End Session
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {/* Voice toggle */}
+                  {ttsSupported && !sessionEnded && (
+                    <button
+                      onClick={() => { setVoiceEnabled(!voiceEnabled); if (voiceEnabled) { window.speechSynthesis?.cancel(); setIsSpeaking(false); } }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${voiceEnabled ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}
+                      title={voiceEnabled ? 'Voice responses on' : 'Voice responses off'}
+                    >
+                      {voiceEnabled ? (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></svg>
+                      ) : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></svg>
+                      )}
+                      {voiceEnabled ? 'Voice On' : 'Voice Off'}
+                    </button>
+                  )}
+                  {!sessionEnded && (
+                    <button onClick={handleStopSession} disabled={isProcessing} className="btn-ghost text-red-500 hover:text-red-700 hover:bg-red-50 !text-xs">
+                      End Session
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
                 {transcript.length === 0 && (
-                  <p className="text-gray-400 text-sm text-center mt-16">Start the conversation — describe what you want to create.</p>
+                  <p className="text-gray-400 text-sm text-center mt-16">
+                    {speechSupported
+                      ? 'Click the mic button and start talking, or type your message below.'
+                      : 'Start the conversation — describe what you want to create.'}
+                  </p>
                 )}
                 {transcript.map((entry, i) => (
                   <div key={i} className={`flex ${entry.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -251,11 +312,17 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
                         {isRecording ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg> : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /></svg>}
                       </button>
                     )}
-                    <input type="text" value={inputText} onChange={(e) => { setInputText(e.target.value); setError(null); }} onKeyDown={handleKeyDown} placeholder="Chat with your AI Creative Director..." disabled={isProcessing} className="input-base !rounded-xl flex-1" />
+                    <input type="text" value={inputText} onChange={(e) => { setInputText(e.target.value); setError(null); }} onKeyDown={handleKeyDown} placeholder={isRecording ? 'Listening...' : 'Chat with your AI Creative Director...'} disabled={isProcessing} className="input-base !rounded-xl flex-1" />
                     <button onClick={handleSendText} disabled={isProcessing || !inputText.trim()} className="w-10 h-10 rounded-xl bg-gradient-brand text-white flex items-center justify-center shadow-md shadow-brand-500/25 hover:shadow-lg disabled:opacity-50 transition-all">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
                     </button>
                   </div>
+                  {isRecording && (
+                    <p className="text-xs text-red-500 mt-2 flex items-center gap-1.5">
+                      <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                      Listening... speak now. Message will send automatically when you stop.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -286,7 +353,7 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
               <div className="card p-5">
                 <h3 className="text-sm font-semibold text-gray-900 mb-3">Pro Tips</h3>
                 <ul className="space-y-2.5">
-                  {['Be specific about your target audience', 'Mention preferred platforms', 'Share brand guidelines if available'].map((tip) => (
+                  {['Click the mic and talk — it auto-sends', 'Ask about trends on any platform', 'Share your brand guidelines for better results'].map((tip) => (
                     <li key={tip} className="flex items-start gap-2.5 text-sm text-gray-600">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-brand-500 mt-0.5 shrink-0"><circle cx="12" cy="12" r="10" fill="currentColor" opacity="0.15" /><path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                       {tip}
