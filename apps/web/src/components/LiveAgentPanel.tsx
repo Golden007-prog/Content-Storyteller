@@ -93,9 +93,13 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
       }
       setInputText(transcript);
     };
-    recognition.onerror = () => {
+    recognition.onerror = (event: any) => {
       setIsRecording(false);
-      setError('Speech recognition error. Please try again or type your message.');
+      // Only show persistent error for permission-denied; ignore transient errors like no-speech
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setError('Microphone access denied. Please allow microphone permissions or type your message.');
+      }
+      // For 'no-speech', 'aborted', 'network' etc., fail silently — user can just try again
     };
     recognition.onend = () => {
       setIsRecording(false);
@@ -242,10 +246,12 @@ export function LiveAgentPanel({ onUseCreativeDirection }: LiveAgentPanelProps) 
               {!sessionEnded && (
                 <div className="px-6 py-4 border-t border-gray-100">
                   <div className="flex items-center gap-3">
-                    <button onClick={toggleMic} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${isRecording ? 'bg-red-100 text-red-600 animate-pulseGlow' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`} title={isRecording ? 'Stop recording' : 'Start recording'}>
-                      {isRecording ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg> : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /></svg>}
-                    </button>
-                    <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} onKeyDown={handleKeyDown} placeholder="Chat with your AI Creative Director..." disabled={isProcessing} className="input-base !rounded-xl flex-1" />
+                    {speechSupported && (
+                      <button onClick={toggleMic} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${isRecording ? 'bg-red-100 text-red-600 animate-pulseGlow' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`} title={isRecording ? 'Stop recording' : 'Start recording'}>
+                        {isRecording ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg> : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /></svg>}
+                      </button>
+                    )}
+                    <input type="text" value={inputText} onChange={(e) => { setInputText(e.target.value); setError(null); }} onKeyDown={handleKeyDown} placeholder="Chat with your AI Creative Director..." disabled={isProcessing} className="input-base !rounded-xl flex-1" />
                     <button onClick={handleSendText} disabled={isProcessing || !inputText.trim()} className="w-10 h-10 rounded-xl bg-gradient-brand text-white flex items-center justify-center shadow-md shadow-brand-500/25 hover:shadow-lg disabled:opacity-50 transition-all">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
                     </button>
