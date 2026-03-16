@@ -5,10 +5,10 @@
 # Substitution variables:
 #   _REGION       — GCP region (default: us-central1)
 #   _AR_REPO      — Artifact Registry repository name (default: content-storyteller)
+#   _TAG          — Image tag (default: latest; override with SHORT_SHA via trigger)
 #
 # Usage (manual submit):
-#   gcloud builds submit --config cloudbuild.yaml \
-#     --substitutions=_REGION=us-central1,_AR_REPO=content-storyteller
+#   gcloud builds submit --config cloudbuild.yaml --project=deep-hook-468814-t7
 #
 # Usage (trigger-based — SHORT_SHA is auto-populated):
 #   Attach this config to a Cloud Build trigger on the main branch.
@@ -16,6 +16,7 @@
 substitutions:
   _REGION: us-central1
   _AR_REPO: content-storyteller
+  _TAG: latest
 
 steps:
   # 1. Install dependencies
@@ -43,7 +44,7 @@ steps:
     args:
       - 'build'
       - '-t'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:${SHORT_SHA:-latest}'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:${_TAG}'
       - '-t'
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:latest'
       - '-f'
@@ -57,7 +58,7 @@ steps:
     args:
       - 'build'
       - '-t'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:${SHORT_SHA:-latest}'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:${_TAG}'
       - '-t'
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:latest'
       - '-f'
@@ -97,6 +98,8 @@ steps:
       - '${_REGION}'
       - '--service-account'
       - 'api-sa@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--set-env-vars'
+      - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},UPLOADS_BUCKET=$PROJECT_ID-uploads,ASSETS_BUCKET=$PROJECT_ID-assets,FIRESTORE_DATABASE=(default),PUBSUB_TOPIC=content-generation-jobs,CORS_ORIGIN=https://golden007-prog.github.io,VERTEX_TEXT_MODEL=gemini-2.5-flash,VERTEX_TEXT_FALLBACK_MODEL=gemini-2.5-flash,VERTEX_REASONING_MODEL=gemini-2.5-pro,VERTEX_IMAGE_MODEL=gemini-2.5-flash,VERTEX_IMAGE_HQ_MODEL=gemini-2.5-pro'
       - '--allow-unauthenticated'
       - '--memory'
       - '512Mi'
@@ -123,6 +126,8 @@ steps:
       - '${_REGION}'
       - '--service-account'
       - 'worker-sa@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--set-env-vars'
+      - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},UPLOADS_BUCKET=$PROJECT_ID-uploads,ASSETS_BUCKET=$PROJECT_ID-assets,TEMP_BUCKET=$PROJECT_ID-temp,FIRESTORE_DATABASE=(default),PUBSUB_SUBSCRIPTION=content-generation-jobs-sub,VERTEX_TEXT_MODEL=gemini-2.5-flash,VERTEX_TEXT_FALLBACK_MODEL=gemini-2.5-flash,VERTEX_REASONING_MODEL=gemini-2.5-pro,VERTEX_IMAGE_MODEL=gemini-2.5-flash,VERTEX_IMAGE_HQ_MODEL=gemini-2.5-pro'
       - '--no-allow-unauthenticated'
       - '--memory'
       - '1Gi'
@@ -141,6 +146,8 @@ steps:
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:latest'
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:latest'
+
+timeout: 1800s
 
 options:
   logging: CLOUD_LOGGING_ONLY

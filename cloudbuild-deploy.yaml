@@ -9,6 +9,7 @@
 substitutions:
   _REGION: us-central1
   _AR_REPO: content-storyteller
+  _TAG: latest
 
 steps:
   # 1. Install dependencies
@@ -114,6 +115,8 @@ steps:
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:latest'
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/worker:latest'
+
+timeout: 1800s
 
 options:
   logging: CLOUD_LOGGING_ONLY
